@@ -1,0 +1,3 @@
+  const sidebarItems = [
+  console.log("Sidebar items:", sidebarItems);
+          {sidebarItems

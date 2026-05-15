@@ -1,0 +1,16 @@
+  const [activeModule, setActiveModule] = useState<'darbai' | 'verslo' | 'ceo'>(() => {
+        setActiveModule('verslo');
+        setActiveModule('darbai');
+                                            setActiveModule('darbai');
+                                      setActiveModule('darbai');
+                    setActiveModule(item.module as any);
+                    (activeModule === item.module && (!item.tab || activeTab === item.tab)) ? "bg-brand-lime text-black shadow-lg shadow-brand-lime/20" : "text-white/50 hover:bg-white/5 hover:text-white"
+                  {item.icon && <item.icon size={18} className={cn("transition-transform group-hover:scale-110", (activeModule === item.module && (!item.tab || activeTab === item.tab)) ? "text-black" : "text-white/30")} />}
+                  {(activeModule === item.module && (!item.tab || activeTab === item.tab)) && <ChevronRight size={14} className="ml-auto" />}
+                {activeModule === 'ceo' ? 'CEO Skydas' : activeModule === 'darbai' ? 'Sporto klubų darbai' : 'Verslo informacija'}
+              {activeModule === 'darbai' && (
+            {activeModule === 'darbai' && (
+          {activeModule === 'ceo' ? (
+                  setActiveModule('darbai');
+          ) : activeModule === 'darbai' ? (
+    {activeModule === 'darbai' && (
