@@ -3,7 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useNavigate, useLocation } from "react-router-dom";
+import {
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
@@ -63,6 +69,7 @@ import {
   Dumbbell,
   Activity,
   HeartPulse,
+  LogOut,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -126,7 +133,6 @@ import { users } from "./mock-db/users";
 import type { User } from "./mock-db/users";
 import { initialCities } from "./mock-db/cities";
 import type { City } from "./mock-db/cities";
-import { currentUser as SIMULATED_USER } from "./mock-db/currentUser";
 import { getScopedFaults } from "./logic/regionScopeLogic";
 import { surveys as initialSurveys } from "./mock-db/surveys";
 import { filterFaultTypes } from "./logic/faultSearchLogic";
@@ -177,6 +183,12 @@ import { handleQrReport } from "./logic/qrLogic";
 import { AdminModule } from "./components/AdminModule";
 import { OpsFlowView } from "./components/OpsFlowView";
 import { EquipmentSearchModal } from "./components/EquipmentSearchModal";
+import {
+  workflowTypes as initialWorkflowTypes,
+  getWorkflowTypeByLegacyCategory,
+  getWorkflowTypeById,
+  WorkflowType,
+} from "./mock-db/workflowTypes";
 
 import { OrderProvider } from "./modules/orders/OrderContext";
 import { OrderModule } from "./modules/orders/OrderModule";
@@ -214,6 +226,10 @@ import {
 import { CeoDashboard } from "./modules/ceo/CeoDashboard";
 import { sops as MOCK_SOPS } from "./mock-db/sops";
 import { ordersList as MOCK_ORDERS } from "./mock-db/orders";
+import { AuthProvider } from "./auth/AuthProvider";
+import { LoginPage } from "./auth/LoginPage";
+import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { useAuth } from "./auth/authContext";
 
 const CLUBS = clubs;
 const SUPPLIERS = MOCK_SUPPLIERS;
@@ -3345,7 +3361,12 @@ const TaskDetailView = ({
           <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-slate-100 text-slate-700 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest border border-slate-200">
             #{task.code}
           </span>
-                  <div className="lg:col-span-2 space-y-4 sm:space-y-8">
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 max-w-6xl mx-auto">
+          <div className="lg:col-span-2 space-y-4 sm:space-y-8">
             {/* Main Card */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="p-4 sm:p-8 space-y-4 sm:space-y-6">
@@ -3367,7 +3388,7 @@ const TaskDetailView = ({
             {/* History */}
             <div className="space-y-2 sm:space-y-4">
               <h3 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
-                <History size={18} sm:size={20} className="text-brand-lime" />
+                <History size={18} className="text-brand-lime sm:size-5" />
                 Istorija
               </h3>
               <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 overflow-hidden space-y-2 sm:space-y-4">
@@ -3452,6 +3473,8 @@ const TaskDetailView = ({
             </div>
           </div>
         </div>
+
+
       </main>
     </div>
   );
@@ -3506,6 +3529,8 @@ class ErrorBoundary extends React.Component<
 function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUser: authenticatedUser, logout } = useAuth();
+  const currentUser = authenticatedUser!;
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const toggleExpand = (id: string) => {
@@ -3609,9 +3634,21 @@ function MainApp() {
     return () => window.removeEventListener("popstate", checkRoute);
   }, []);
 
+  const applyWorkflowMigration = (items: Fault[]): Fault[] =>
+    items.map((item) => ({
+      ...item,
+      workflowTypeId:
+        item.workflowTypeId ||
+        getWorkflowTypeByLegacyCategory(item.category || item.type)?.id ||
+        getWorkflowTypeByLegacyCategory("OTHER")?.id,
+    }));
+
+  const [workflowTypes, setWorkflowTypes] =
+    useState<WorkflowType[]>(initialWorkflowTypes);
+
   const [faults, setFaults] = useState<Fault[]>(() => {
     const saved = localStorage.getItem("app_faults");
-    return saved ? JSON.parse(saved) : INITIAL_FAULTS;
+    return applyWorkflowMigration(saved ? JSON.parse(saved) : INITIAL_FAULTS);
   });
 
   useEffect(() => {
@@ -3621,7 +3658,7 @@ function MainApp() {
   const [appSurveys, setAppSurveys] = useState(initialSurveys);
   const [tasks, setTasks] = useState<Fault[]>(() => {
     const saved = localStorage.getItem("app_tasks");
-    return saved ? JSON.parse(saved) : (mockTasks as any);
+    return applyWorkflowMigration(saved ? JSON.parse(saved) : (mockTasks as any));
   });
 
   useEffect(() => {
@@ -3634,7 +3671,14 @@ function MainApp() {
   >(MOCK_INVENTORY_SETTINGS);
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [appClubs, setAppClubs] = useState<Club[]>(clubs);
-  const [appUsers, setAppUsers] = useState<User[]>(users);
+  const [appUsers, setAppUsers] = useState<User[]>(() => {
+    const saved = localStorage.getItem("app_users");
+    return saved ? JSON.parse(saved) : users;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("app_users", JSON.stringify(appUsers));
+  }, [appUsers]);
   const [appCities, setAppCities] = useState<City[]>(initialCities);
   const [appFacilityTemplates, setAppFacilityTemplates] =
     useState<any[]>(facilityTemplates);
@@ -3790,7 +3834,9 @@ function MainApp() {
   const [isSopModalOpen, setIsSopModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRegion, setSelectedRegion] = useState(
-    SIMULATED_USER.role === "OPS" ? "ALL" : SIMULATED_USER.region,
+    ["SUPER_ADMIN", "ADMIN", "OPS"].includes(currentUser.role)
+      ? "ALL"
+      : currentUser.region,
   );
   const [clubFilter, setClubFilter] = useState("all");
   const [slaFilter, setSlaFilter] = useState("visi");
@@ -4033,6 +4079,7 @@ function MainApp() {
     isDangerous: false,
     attachments: [] as Attachment[],
     category: undefined as string | undefined,
+    workflowTypeId: undefined as string | undefined,
     orderCategory: undefined as ProductCategory | undefined,
     deliveryAddress: "",
     phone: "",
@@ -4214,8 +4261,6 @@ function MainApp() {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isConversionModalOpen, setIsConversionModalOpen] = useState(false);
-
-  const currentUser = SIMULATED_USER;
 
   // --- SLA & Priority Logic ---
   React.useEffect(() => {
@@ -4508,6 +4553,7 @@ function MainApp() {
       isDangerous: false,
       attachments: [],
       category: undefined,
+      workflowTypeId: undefined,
       orderCategory: undefined,
       deliveryAddress: "",
       phone: "",
@@ -5039,6 +5085,9 @@ function MainApp() {
       sopUrl: finalSopUrl,
       sopStatus: finalSopStatus,
       category: regForm.category,
+      workflowTypeId:
+        regForm.workflowTypeId ||
+        getWorkflowTypeByLegacyCategory(regForm.category)?.id,
       region: club?.city,
       typeId: regForm.typeId, // Legacy mapping
       equipmentId:
@@ -5768,9 +5817,12 @@ ${task.updatedBy}
       const matchesType =
         typeFilters.length === 0
           ? true
-          : f.type
-            ? typeFilters.includes(f.type)
-            : false;
+          : typeFilters.some(
+              (filter) =>
+                filter === f.type ||
+                filter === f.category ||
+                filter === f.workflowTypeId,
+            );
       const source = f.source || "USER";
       const matchesSource = sourceFilter === "ALL" || source === sourceFilter;
 
@@ -5892,17 +5944,21 @@ ${task.updatedBy}
     }
   };
 
+  const hasModulePermission = (moduleId?: string) =>
+    !moduleId || currentUser.modulePermissions?.includes(moduleId as any);
+
   const subModules: any[] = [
-    { id: "kanban", label: "Darbai", icon: AlertCircle },
+    { id: "kanban", label: "Darbai", icon: AlertCircle, module: "darbai" },
     { id: "orders", label: "Užsakymai", icon: ShoppingCart },
-    { id: "analytics", label: "Analitika", icon: BarChart3 },
-    { id: "audit", label: "Auditas", icon: History },
+    { id: "analytics", label: "Analitika", icon: BarChart3, module: "analytics" },
+    { id: "audit", label: "Auditas", icon: History, module: "audit" },
   ].filter(
     (tab: any) =>
-      !tab.role ||
-      (Array.isArray(tab.role)
-        ? tab.role.includes(currentUser.role as string)
-        : currentUser.role === tab.role),
+      hasModulePermission(tab.module || tab.id) &&
+      (!tab.role ||
+        (Array.isArray(tab.role)
+          ? tab.role.includes(currentUser.role as string)
+          : currentUser.role === tab.role)),
   );
 
   const sidebarItems = [
@@ -6014,6 +6070,7 @@ ${task.updatedBy}
           {sidebarItems
             .filter((item) => {
               if (item.hidden) return false;
+              if (!hasModulePermission(item.module)) return false;
               if (!item.role) return true;
               const roles = Array.isArray(item.role) ? item.role : [item.role];
               return roles.includes(currentUser.role);
@@ -6206,6 +6263,17 @@ ${task.updatedBy}
               </p>
             </div>
           </div>
+          <button
+            onClick={() => {
+              logout();
+              navigate("/login", { replace: true });
+              setIsSidebarOpen(false);
+            }}
+            className="mt-2 w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-black text-white/50 hover:bg-white/5 hover:text-white transition-all"
+          >
+            <LogOut size={17} className="text-white/30" />
+            Atsijungti
+          </button>
         </div>
       </aside>
 
@@ -6496,6 +6564,8 @@ ${task.updatedBy}
               clubTaskConfigs={clubTaskConfigs}
               setClubTaskConfigs={setClubTaskConfigs}
               tasks={faults}
+              workflowTypes={workflowTypes}
+              setWorkflowTypes={setWorkflowTypes}
               renderPeriodicModule={() => <PeriodicAdminModule />}
               onTabChange={(tab) => {
                 const mapping: Record<string, string> = {
@@ -6507,6 +6577,7 @@ ${task.updatedBy}
                   equipment: "/admin/treniruokliai",
                   equipment_issues: "/admin/gedimo-tipai",
                   inventory: "/admin/uzsakymai",
+                  workflow_types: "/admin/workflow-types",
                 };
                 navigate(mapping[tab] || "/admin/vartotojai");
               }}
@@ -6522,6 +6593,8 @@ ${task.updatedBy}
                       ? "periodic_templates"
                       : activeTab === "admin-facility"
                         ? "facility"
+                        : activeTab === "admin-workflow_types"
+                          ? "workflow_types"
                         : (activeTab.replace("admin-", "") as any)
               }
             />
@@ -6990,6 +7063,8 @@ ${task.updatedBy}
                           clubTaskConfigs={clubTaskConfigs}
                           setClubTaskConfigs={setClubTaskConfigs}
                           tasks={faults}
+                          workflowTypes={workflowTypes}
+                          setWorkflowTypes={setWorkflowTypes}
                           renderPeriodicModule={() => <PeriodicAdminModule />}
                           activeTab={
                             activeTab === "admin-products" ||
@@ -7002,8 +7077,10 @@ ${task.updatedBy}
                                   ? "periodic_templates"
                                   : activeTab === "admin-periodiniai"
                                     ? "periodiniai"
-                                    : activeTab === "admin-facility"
+                                  : activeTab === "admin-facility"
                                       ? "facility"
+                                      : activeTab === "admin-workflow_types"
+                                        ? "workflow_types"
                                       : (activeTab.replace("admin-", "") as any)
                           }
                           inventorySubTab={
@@ -7026,6 +7103,8 @@ ${task.updatedBy}
                               setActiveTab("admin-periodiniai" as any);
                             } else if (tab === "facility") {
                               setActiveTab("admin-facility" as any);
+                            } else if (tab === "workflow_types") {
+                              setActiveTab("admin-workflow_types" as any);
                             } else {
                               setActiveTab(`admin-${tab}` as any);
                             }
@@ -7486,11 +7565,17 @@ ${task.updatedBy}
           <HomeActionModal
             isOpen={activeModal === "home"}
             onClose={() => setActiveModal(null)}
-            onSelectAction={(action, subType) => {
+            workflows={workflowTypes}
+            onSelectAction={(action, subType, workflowTypeId) => {
+              const workflow =
+                getWorkflowTypeById(workflowTypeId) ||
+                getWorkflowTypeByLegacyCategory(subType);
               resetRegForm();
               setRegForm((prev) => ({
                 ...prev,
                 category: subType || undefined,
+                workflowTypeId: workflow?.id,
+                typeId: action === "other" ? "other" : prev.typeId,
               }));
 
               if (action === "fault") {
@@ -9429,9 +9514,22 @@ ${task.updatedBy}
 
 export default function App() {
   return (
-    <ErrorBoundary>
-      <MainApp />
-    </ErrorBoundary>
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <ErrorBoundary>
+                <MainApp />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/darbai" replace />} />
+      </Routes>
+    </AuthProvider>
   );
 }
 

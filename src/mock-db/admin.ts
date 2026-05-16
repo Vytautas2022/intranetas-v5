@@ -80,6 +80,8 @@ export interface Product {
   has_local_stock?: boolean;
   target_quantity?: number;
   local_stock_quantity?: number;
+  minimumClubQuantity?: number;
+  minimumSupplierOrderQuantity?: number;
   is_active?: boolean;
   is_custom?: boolean;
   dimensions?: string;
@@ -341,6 +343,12 @@ export function seedEquipmentData() {
 // Execute seeding after all variables are defined
 // Moving to the absolute end to avoid any initialization order issues
 seedEquipmentData();
+
+productsList.forEach((product) => {
+  product.minimumClubQuantity = product.minimumClubQuantity ?? 0;
+  product.minimumSupplierOrderQuantity =
+    product.minimumSupplierOrderQuantity ?? 0;
+});
 
 
 export interface EquipmentIssueType {

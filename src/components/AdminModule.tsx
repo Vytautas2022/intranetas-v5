@@ -22,6 +22,7 @@ import {
   RotateCcw as History,
   RefreshCw,
   FileText,
+  Workflow,
 } from "lucide-react";
 import { AuditAdmin } from "./AuditAdmin";
 import { createAuditLogEntry } from "../logic/auditLogic";
@@ -45,6 +46,11 @@ import {
 } from "../mock-db/admin";
 import { users as initialUsers, User } from "../mock-db/users";
 import { initialCities, City } from "../mock-db/cities";
+import {
+  workflowIconMap,
+  workflowTypes as initialWorkflowTypes,
+  WorkflowType,
+} from "../mock-db/workflowTypes";
 
 interface AdminModuleProps {
   products: Product[];
@@ -72,6 +78,8 @@ interface AdminModuleProps {
   clubTaskConfigs: any[];
   setClubTaskConfigs: React.Dispatch<React.SetStateAction<any[]>>;
   tasks: any[];
+  workflowTypes?: WorkflowType[];
+  setWorkflowTypes?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
   renderPeriodicModule?: () => React.ReactNode;
   activeTab?:
     | "clubs"
@@ -82,7 +90,8 @@ interface AdminModuleProps {
     | "users"
     | "inventory"
     | "periodic_templates"
-    | "periodiniai";
+    | "periodiniai"
+    | "workflow_types";
   onTabChange?: (
     tab:
       | "clubs"
@@ -93,7 +102,8 @@ interface AdminModuleProps {
       | "users"
       | "inventory"
       | "periodic_templates"
-      | "periodiniai",
+      | "periodiniai"
+      | "workflow_types",
   ) => void;
   inventorySubTab?: "products" | "suppliers" | "inventory_settings";
   onSubTabChange?: (
@@ -125,6 +135,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   clubTaskConfigs,
   setClubTaskConfigs,
   tasks,
+  workflowTypes = initialWorkflowTypes,
+  setWorkflowTypes,
   renderPeriodicModule,
   inventorySubTab,
   onSubTabChange,
@@ -145,6 +157,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     equipment: "/admin/treniruokliai",
     equipment_issues: "/admin/gedimo-tipai",
     inventory: "/admin/uzsakymai",
+    workflow_types: "/admin/workflow-types",
     audit: "/admin/auditas",
   };
 
@@ -156,6 +169,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     { id: "equipment", label: "Treniruokliai", icon: Dumbbell },
     { id: "equipment_issues", label: "Gedimo tipas", icon: Activity },
     { id: "inventory", label: "Užsakymai", icon: Package },
+    { id: "workflow_types", label: "Workflow Types", icon: Workflow },
     { id: "periodiniai", label: "Periodiniai darbai", icon: RefreshCw },
     { id: "audit", label: "Auditas", icon: FileText },
   ] as const;
@@ -242,6 +256,12 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             onSubTabChange={onSubTabChange as any}
           />
         )}
+        {path.includes(tabRoutes.workflow_types) && (
+          <WorkflowTypesAdmin
+            workflows={workflowTypes}
+            setWorkflows={setWorkflowTypes}
+          />
+        )}
         {path.includes(tabRoutes.audit) && <AuditAdmin />}
       </div>
     </div>
@@ -282,6 +302,316 @@ function AdminModal({
         </div>
         <div className="p-4 md:p-6 overflow-y-auto">{children}</div>
       </motion.div>
+    </div>
+  );
+}
+
+function WorkflowTypesAdmin({
+  workflows,
+  setWorkflows,
+}: {
+  workflows: WorkflowType[];
+  setWorkflows?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
+}) {
+  const [editing, setEditing] = useState<WorkflowType | null>(null);
+
+  const saveWorkflow = () => {
+    if (!editing || !setWorkflows) return;
+
+    const exists = workflows.some((workflow) => workflow.id === editing.id);
+    const nextWorkflow = {
+      ...editing,
+      id:
+        editing.id ||
+        editing.name
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, ""),
+      legacyCategory: editing.legacyCategory || editing.id || "OTHER",
+      statuses: editing.statuses.length ? editing.statuses : initialWorkflowTypes[0].statuses,
+      priorities: editing.priorities.length
+        ? editing.priorities
+        : initialWorkflowTypes[0].priorities,
+      kanbanSettings: {
+        ...editing.kanbanSettings,
+        lanes: editing.statuses.map((status) => status.id),
+      },
+    };
+
+    setWorkflows(
+      exists
+        ? workflows.map((workflow) =>
+            workflow.id === editing.id ? nextWorkflow : workflow,
+          )
+        : [...workflows, nextWorkflow],
+    );
+    setEditing(null);
+  };
+
+  const createWorkflow = () => {
+    const base = initialWorkflowTypes[0];
+    setEditing({
+      ...base,
+      id: `workflow-${Date.now()}`,
+      legacyCategory: "OTHER",
+      action: "other",
+      name: "Naujas workflow",
+      description: "Naujas konfiguruojamas procesas",
+      icon: "AlertCircle",
+      category: "DARBAI",
+      enabled: true,
+      linkedConfigs: {},
+      templates: [],
+    });
+  };
+
+  return (
+    <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-xl font-bold">Workflow Types</h2>
+          <p className="text-sm text-slate-500 font-medium">
+            Universal workflow engine konfiguracija is mock DB sluoksnio.
+          </p>
+        </div>
+        <button
+          onClick={createWorkflow}
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
+        >
+          <Plus size={16} /> Sukurti workflow
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {workflows.map((workflow) => {
+          const Icon =
+            workflowIconMap[workflow.icon as keyof typeof workflowIconMap] ||
+            AlertCircle;
+
+          return (
+            <div
+              key={workflow.id}
+              className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm space-y-4"
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={cn(
+                    "w-11 h-11 rounded-xl flex items-center justify-center shrink-0",
+                    workflow.bg,
+                  )}
+                >
+                  <Icon size={20} className={workflow.color} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-slate-900 truncate">
+                      {workflow.name}
+                    </h3>
+                    <span
+                      className={cn(
+                        "text-[9px] font-black uppercase rounded-full px-2 py-0.5",
+                        workflow.enabled
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-slate-100 text-slate-500",
+                      )}
+                    >
+                      {workflow.enabled ? "On" : "Off"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                    {workflow.description}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">Category</span>
+                  {workflow.category}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">SLA</span>
+                  {workflow.slaRules.defaultHours}h
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">Statuses</span>
+                  {workflow.statuses.length}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">Roles</span>
+                  {workflow.allowedRoles.length}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    setWorkflows?.(
+                      workflows.map((item) =>
+                        item.id === workflow.id
+                          ? { ...item, enabled: !item.enabled }
+                          : item,
+                      ),
+                    )
+                  }
+                  className="flex-1 px-3 py-2 rounded-xl bg-slate-50 text-slate-700 text-xs font-black hover:bg-slate-100"
+                >
+                  {workflow.enabled ? "Isjungti" : "Ijungti"}
+                </button>
+                <button
+                  onClick={() => setEditing(workflow)}
+                  className="flex-1 px-3 py-2 rounded-xl bg-black text-white text-xs font-black hover:bg-slate-800"
+                >
+                  Redaguoti
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <AdminModal
+        title="Workflow konfiguracija"
+        isOpen={Boolean(editing)}
+        onClose={() => setEditing(null)}
+      >
+        {editing && (
+          <div className="space-y-4">
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Pavadinimas
+              </span>
+              <input
+                value={editing.name}
+                onChange={(event) =>
+                  setEditing({ ...editing, name: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Aprasymas
+              </span>
+              <textarea
+                value={editing.description}
+                onChange={(event) =>
+                  setEditing({ ...editing, description: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-medium min-h-[90px]"
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  Grupe
+                </span>
+                <select
+                  value={editing.category}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      category: event.target.value as WorkflowType["category"],
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="DARBAI">Darbai</option>
+                  <option value="KONTROLE">Kontrole</option>
+                  <option value="UZSAKYMAI">Uzsakymai</option>
+                  <option value="IDEJOS">Idejos</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  SLA val.
+                </span>
+                <input
+                  type="number"
+                  value={editing.slaRules.defaultHours}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      slaRules: {
+                        ...editing.slaRules,
+                        defaultHours: Number(event.target.value),
+                      },
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                />
+              </label>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Statusai
+              </span>
+              <input
+                value={editing.statuses.map((status) => status.label).join(", ")}
+                onChange={(event) => {
+                  const statuses = event.target.value
+                    .split(",")
+                    .map((value) => value.trim())
+                    .filter(Boolean)
+                    .map((value) => ({ id: value, label: value }));
+                  setEditing({
+                    ...editing,
+                    statuses,
+                    kanbanSettings: {
+                      ...editing.kanbanSettings,
+                      lanes: statuses.map((status) => status.id),
+                    },
+                  });
+                }}
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Leistinos roles
+              </span>
+              <input
+                value={editing.allowedRoles.join(", ")}
+                onChange={(event) =>
+                  setEditing({
+                    ...editing,
+                    allowedRoles: event.target.value
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean),
+                  })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
+              <input
+                type="checkbox"
+                checked={editing.enabled}
+                onChange={(event) =>
+                  setEditing({ ...editing, enabled: event.target.checked })
+                }
+                className="h-4 w-4 accent-black"
+              />
+              Workflow ijungtas
+            </label>
+
+            <button
+              onClick={saveWorkflow}
+              className="w-full py-3 bg-black text-white rounded-xl font-black"
+            >
+              Issaugoti
+            </button>
+          </div>
+        )}
+      </AdminModal>
     </div>
   );
 }
@@ -988,29 +1318,64 @@ function UsersAdmin({
   const [searchQuery, setSearchQuery] = useState("");
 
   const ROLES = [
+    "SUPER_ADMIN",
     "ADMIN",
     "OPS",
     "COORDINATOR",
     "CS",
+    "ACCOUNTING",
     "EXTERNAL",
-    "coordinator",
   ];
 
   const filteredUsers = users.filter((user) => {
     const query = searchQuery.toLowerCase();
     return (
       user.name.toLowerCase().includes(query) ||
+      (user.email || "").toLowerCase().includes(query) ||
       user.role.toLowerCase().includes(query)
     );
   });
+  const isPendingAccessUser = (user: User) =>
+    user.id.startsWith("pending-") && user.is_active === false;
 
   const handleSave = () => {
+    const normalizedEmail = editing.email?.trim().toLowerCase();
+
+    if (!editing.name?.trim()) {
+      alert("Vardas yra privalomas");
+      return;
+    }
+
+    if (!normalizedEmail) {
+      alert("El. pastas yra privalomas");
+      return;
+    }
+
+    const normalizedRole = (editing.role || "OPS").toUpperCase() as User["role"];
+    const duplicateEmail = users.find(
+      (user) =>
+        user.id !== editing.id &&
+        (user.email || "").trim().toLowerCase() === normalizedEmail,
+    );
+
+    if (duplicateEmail) {
+      alert("Sis el. pastas jau naudojamas");
+      return;
+    }
+
     if (editing.id) {
       const existingUser = users.find((c) => c.id === editing.id);
       if (existingUser) {
         setUsers(
           users.map((c) =>
-            c.id === editing.id ? ({ ...c, ...editing } as User) : c,
+            c.id === editing.id
+              ? ({
+                  ...c,
+                  ...editing,
+                  email: normalizedEmail,
+                  role: normalizedRole,
+                } as User)
+              : c,
           ),
         );
         createAuditLogEntry({
@@ -1032,8 +1397,9 @@ function UsersAdmin({
         const newUser = {
           ...editing,
           id: editing.id || generateUniqueId("u"),
-          name: editing.name || "",
-          role: editing.role || "OPS",
+          name: editing.name.trim(),
+          email: normalizedEmail,
+          role: normalizedRole,
           is_active: editing.is_active !== false,
           assigned_clubs: editing.assigned_clubs || [],
         } as User;
@@ -1108,6 +1474,7 @@ function UsersAdmin({
           <thead>
             <tr className="border-b border-slate-200 text-slate-500 text-sm">
               <th className="pb-3 font-medium">Vardas</th>
+              <th className="pb-3 font-medium">El. pastas</th>
               <th className="pb-3 font-medium">Rolė</th>
               <th className="pb-3 font-medium">Priskirti klubai</th>
               <th className="pb-3 font-medium">Statusas</th>
@@ -1122,6 +1489,7 @@ function UsersAdmin({
                   className="border-b border-slate-100 hover:bg-slate-50"
                 >
                   <td className="py-4 font-semibold">{user.name}</td>
+                  <td className="py-4 text-xs text-slate-500">{user.email}</td>
                   <td className="py-4">
                     <span className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
                       {user.role}
@@ -1138,9 +1506,19 @@ function UsersAdmin({
                   </td>
                   <td className="py-4">
                     <span
-                      className={`px-2 py-1 rounded-md text-xs font-bold uppercase ${user.is_active !== false ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
+                      className={`px-2 py-1 rounded-md text-xs font-bold uppercase ${
+                        user.is_active !== false
+                          ? "bg-green-100 text-green-700"
+                          : isPendingAccessUser(user)
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-red-100 text-red-700"
+                      }`}
                     >
-                      {user.is_active !== false ? "Aktyvus" : "Neaktyvus"}
+                      {user.is_active !== false
+                        ? "Aktyvus"
+                        : isPendingAccessUser(user)
+                          ? "Laukia patvirtinimo"
+                          : "Neaktyvus"}
                     </span>
                   </td>
                   <td className="py-4 flex justify-end gap-2">
@@ -1177,7 +1555,7 @@ function UsersAdmin({
             ) : (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="py-8 text-center text-slate-500 font-medium"
                 >
                   Nerasta rezultatų
@@ -1197,14 +1575,25 @@ function UsersAdmin({
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="font-bold text-slate-900">{user.name}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{user.email}</p>
                 <span className="inline-block mt-1 px-2 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-600">
                   {user.role}
                 </span>
               </div>
               <span
-                className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${user.is_active !== false ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
+                className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                  user.is_active !== false
+                    ? "bg-green-100 text-green-700"
+                    : isPendingAccessUser(user)
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-red-100 text-red-700"
+                }`}
               >
-                {user.is_active !== false ? "Aktyvus" : "Neaktyvus"}
+                {user.is_active !== false
+                  ? "Aktyvus"
+                  : isPendingAccessUser(user)
+                    ? "Laukia patvirtinimo"
+                    : "Neaktyvus"}
               </span>
             </div>
 
@@ -1285,6 +1674,20 @@ function UsersAdmin({
               value={editing.name || ""}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               className="w-full p-2 border border-slate-200 rounded-lg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+              El. pastas
+            </label>
+            <input
+              type="email"
+              value={editing.email || ""}
+              onChange={(e) =>
+                setEditing({ ...editing, email: e.target.value })
+              }
+              className="w-full p-2 border border-slate-200 rounded-lg"
+              placeholder="vardas@sportgates.lt"
             />
           </div>
           <div>

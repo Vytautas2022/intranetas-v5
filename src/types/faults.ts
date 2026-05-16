@@ -55,6 +55,7 @@ export interface Fault extends MockFault {
   phase?: 'Renkama info' | 'Planuojama' | 'Vykdoma';
   relatedFaultId?: string;
   category?: string;
+  workflowTypeId?: string;
   assigned_to?: string;
   assigned_by?: string;
   assigned_at?: number;
