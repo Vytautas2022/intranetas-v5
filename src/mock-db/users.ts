@@ -1,3 +1,5 @@
+import type { ModulePermission } from "../auth/types";
+
 export interface User {
   id: string;
   name: string;
@@ -5,7 +7,9 @@ export interface User {
   role: 'SUPER_ADMIN' | 'ADMIN' | 'OPS' | 'COORDINATOR' | 'CS' | 'ACCOUNTING' | 'EXTERNAL';
   assigned_clubs?: string[];
   is_active?: boolean;
-  region?: string; // 'Vilnius', 'Kaunas', 'Klaipėda', or 'ALL'
+  region?: string;
+  permissions?: ModulePermission[];
+  modulePermissions?: ModulePermission[];
 }
 
 export const users: User[] = [
@@ -14,5 +18,6 @@ export const users: User[] = [
   { id: "u4", name: "Jonas", email: "jonas@fitsport.lt", role: "COORDINATOR", region: "Klaipėda", is_active: true, assigned_clubs: ["KL_CR", "BIG"] },
   { id: "u3", name: "Admin User", email: "admin@fitsport.lt", role: "OPS", region: "ALL", is_active: true },
   { id: "u5", name: "Super Admin", email: "superadmin@fitsport.lt", role: "SUPER_ADMIN", region: "ALL", is_active: true },
+  { id: "u7", name: "Vytautas", email: "vytautas@sportgates.lt", role: "SUPER_ADMIN", region: "ALL", is_active: true },
   { id: "u6", name: "Buhalterija", email: "accounting@fitsport.lt", role: "ACCOUNTING", region: "ALL", is_active: true }
 ];

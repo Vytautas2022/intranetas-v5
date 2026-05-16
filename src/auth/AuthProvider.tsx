@@ -71,6 +71,38 @@ type SystemUserRecord = User & {
   active?: boolean;
 };
 
+const getDefaultModulePermissions = (role?: string): ModulePermission[] =>
+  rolePermissions[normalizeRole(role)] || rolePermissions.EXTERNAL;
+
+const getConfiguredModulePermissions = (
+  user: SystemUserRecord,
+): ModulePermission[] | null => {
+  const permissions = user.modulePermissions || user.permissions;
+  return Array.isArray(permissions) && permissions.length > 0
+    ? permissions
+    : null;
+};
+
+const ensureModulePermissionsConfig = (
+  user: SystemUserRecord,
+): SystemUserRecord => {
+  const configuredPermissions = getConfiguredModulePermissions(user);
+  if (configuredPermissions) {
+    return {
+      ...user,
+      permissions: configuredPermissions,
+      modulePermissions: configuredPermissions,
+    };
+  }
+
+  const defaultPermissions = getDefaultModulePermissions(user.role || user.roleId);
+  return {
+    ...user,
+    permissions: defaultPermissions,
+    modulePermissions: defaultPermissions,
+  };
+};
+
 const mergeUsers = (seedUsers: User[], savedUsers: SystemUserRecord[]) => {
   const merged = new Map<string, SystemUserRecord>();
 
@@ -79,21 +111,63 @@ const mergeUsers = (seedUsers: User[], savedUsers: SystemUserRecord[]) => {
   });
 
   savedUsers.forEach((user) => {
-    merged.set(normalizeEmail(user.email) || user.id, user);
+    const key = normalizeEmail(user.email) || user.id;
+    const existingUser = merged.get(key);
+    const savedRole = normalizeRole(user.role || user.roleId);
+    const existingRole = normalizeRole(existingUser?.role || existingUser?.roleId);
+    const savedIsAutoExternal =
+      user.id?.startsWith("google-") && savedRole === DEFAULT_GOOGLE_ROLE;
+    const existingIsAdmin =
+      existingRole === "SUPER_ADMIN" || existingRole === "ADMIN";
+
+    if (existingUser && savedIsAutoExternal && existingIsAdmin) {
+      return;
+    }
+
+    merged.set(key, user);
   });
 
   return Array.from(merged.values());
 };
 
-const getSystemUsers = (): SystemUserRecord[] => {
-  if (typeof window === "undefined") return systemUsers;
+const getSavedUserById = (storedId: string): SystemUserRecord | null => {
+  if (typeof window === "undefined") return null;
 
   try {
     const savedUsers = localStorage.getItem(SYSTEM_USERS_STORAGE_KEY);
     const parsedUsers = savedUsers
       ? (JSON.parse(savedUsers) as SystemUserRecord[])
       : [];
-    const users = mergeUsers(systemUsers, parsedUsers);
+    return parsedUsers.find((user) => user.id === storedId) || null;
+  } catch (error) {
+    console.debug("[auth] Failed to inspect saved users by id:", error);
+    return null;
+  }
+};
+
+const getSystemUsers = (): SystemUserRecord[] => {
+  if (typeof window === "undefined") {
+    return systemUsers.map((user) => ensureModulePermissionsConfig(user));
+  }
+
+  try {
+    const savedUsers = localStorage.getItem(SYSTEM_USERS_STORAGE_KEY);
+    const parsedUsers = savedUsers
+      ? (JSON.parse(savedUsers) as SystemUserRecord[])
+      : [];
+    const users = mergeUsers(systemUsers, parsedUsers).map((user) =>
+      ensureModulePermissionsConfig(user),
+    );
+    const repairedSavedUsers = users.filter((user) =>
+      parsedUsers.some((savedUser) => savedUser.id === user.id),
+    );
+    const hasMissingSavedConfig = repairedSavedUsers.some((user) => {
+      const savedUser = parsedUsers.find((item) => item.id === user.id);
+      return Boolean(savedUser && !getConfiguredModulePermissions(savedUser));
+    });
+    if (hasMissingSavedConfig) {
+      localStorage.setItem(SYSTEM_USERS_STORAGE_KEY, JSON.stringify(repairedSavedUsers));
+    }
     console.debug(
       "[auth] Internal users list emails:",
       users.map((user) => ({
@@ -102,12 +176,13 @@ const getSystemUsers = (): SystemUserRecord[] => {
         normalizedEmail: normalizeEmail(user.email),
         role: normalizeRole(user.role || user.roleId),
         active: user.is_active !== false && user.active !== false,
+        modulePermissions: user.modulePermissions,
       })),
     );
     return users;
   } catch (error) {
     console.debug("[auth] Failed to load system users:", error);
-    return systemUsers;
+    return systemUsers.map((user) => ensureModulePermissionsConfig(user));
   }
 };
 
@@ -140,26 +215,28 @@ const saveAutoApprovedGoogleUser = (
       is_active: true,
       active: true,
     };
+    const approvedUserWithPermissions = ensureModulePermissionsConfig(approvedUser);
 
     const nextUsers = existingUser
       ? parsedUsers.map((user) =>
-          normalizeEmail(user.email) === normalizedEmail ? approvedUser : user,
+          normalizeEmail(user.email) === normalizedEmail ? approvedUserWithPermissions : user,
         )
-      : [...parsedUsers, approvedUser];
+      : [...parsedUsers, approvedUserWithPermissions];
 
     if (existingUser && !parsedUsers.some((user) => normalizeEmail(user.email) === normalizedEmail)) {
-      nextUsers.push(approvedUser);
+      nextUsers.push(approvedUserWithPermissions);
     }
 
     localStorage.setItem(SYSTEM_USERS_STORAGE_KEY, JSON.stringify(nextUsers));
     console.debug("[auth] Auto-approved Google user saved:", {
-      id: approvedUser.id,
-      email: approvedUser.email,
-      role: approvedUser.role,
-      active: approvedUser.is_active,
+      id: approvedUserWithPermissions.id,
+      email: approvedUserWithPermissions.email,
+      role: approvedUserWithPermissions.role,
+      active: approvedUserWithPermissions.is_active,
+      modulePermissions: approvedUserWithPermissions.modulePermissions,
       source: existingUser ? "existing-system-user" : "new-google-domain-user",
     });
-    return approvedUser;
+    return approvedUserWithPermissions;
   } catch (error) {
     console.debug("[auth] Failed to save auto-approved Google user:", error);
     return null;
@@ -172,11 +249,8 @@ const mapSystemUserToAuthUser = (
 ): AuthUser => {
   const region = user.region || "ALL";
   const role = normalizeRole(user.role || user.roleId) as AuthUser["role"];
-  const permissions =
-    user.modulePermissions ||
-    user.permissions ||
-    rolePermissions[role] ||
-    rolePermissions.EXTERNAL;
+  const userWithPermissions = ensureModulePermissionsConfig(user);
+  const permissions = userWithPermissions.modulePermissions || getDefaultModulePermissions(role);
 
   return {
     id: user.id,
@@ -251,7 +325,37 @@ const findStoredUser = (): AuthUser | null => {
       user.id === storedId && user.is_active !== false && user.active !== false,
   );
 
-  return systemUser ? mapSystemUserToAuthUser(systemUser) : null;
+  if (systemUser) {
+    console.debug("[auth] Stored auth user matched by id:", {
+      storedId,
+      matchedUser: systemUser,
+      loadedRole: normalizeRole(systemUser.role || systemUser.roleId),
+    });
+    return mapSystemUserToAuthUser(systemUser);
+  }
+
+  const savedUser = getSavedUserById(storedId);
+  const savedEmail = normalizeEmail(savedUser?.email);
+  const repairedSystemUser = savedEmail
+    ? getSystemUsers().find(
+        (user) =>
+          normalizeEmail(user.email) === savedEmail &&
+          user.is_active !== false &&
+          user.active !== false,
+      )
+    : null;
+
+  if (repairedSystemUser) {
+    const repairedAuthUser = mapSystemUserToAuthUser(repairedSystemUser);
+    persistUser(repairedAuthUser, Boolean(localStorage.getItem(AUTH_STORAGE_KEY)));
+    return repairedAuthUser;
+  }
+
+  console.debug("[auth] Stored auth user could not be matched:", {
+    storedId,
+    savedUser,
+  });
+  return null;
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {

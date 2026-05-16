@@ -3551,6 +3551,7 @@ function MainApp() {
   const activeModule: string = useMemo(() => {
     const path = location.pathname.toLowerCase();
     if (path.includes("/ceo")) return "ceo";
+    if (path.includes("/ops-flow")) return "ops-flow";
     if (path.includes("/zmones")) return "zmones";
     if (path.includes("/admin")) return "admin";
     return "darbai";
@@ -3559,8 +3560,10 @@ function MainApp() {
   const activeTab: string = useMemo(() => {
     const path = location.pathname.toLowerCase();
     if (path.includes("/ceo")) return "ceo";
+    if (path.includes("/ops-flow")) return "ops-flow";
     if (path.includes("/analitika")) return "analytics";
     if (path.includes("/darbai")) return "kanban";
+    if (path.includes("/periodiniai")) return "periodiniai";
     if (path.includes("/admin/miestai")) return "admin-cities";
     if (path.includes("/admin/padaliniai")) return "admin-clubs";
     if (path.includes("/admin/vartotojai")) return "admin-users";
@@ -3605,9 +3608,11 @@ function MainApp() {
     const currentPath = window.location.pathname;
     const viewMap: Record<string, string> = {
       ceo: "/ceo",
+      "ops-flow": "/ops-flow",
       kanban: "/darbai",
       analytics: "/analitika",
       audit: "/audit",
+      periodiniai: "/periodiniai",
       admin: "/admin",
     };
 
@@ -5944,11 +5949,23 @@ ${task.updatedBy}
     }
   };
 
-  const hasModulePermission = (moduleId?: string) =>
-    !moduleId || currentUser.modulePermissions?.includes(moduleId as any);
+  const hasModulePermission = (moduleId?: string) => {
+    if (!moduleId) return true;
+
+    const permissions = currentUser.modulePermissions || [];
+    const hasConfig = permissions.length > 0;
+    const allowed = permissions.includes(moduleId as any);
+
+    if (!hasConfig) {
+      return currentUser.role === "SUPER_ADMIN";
+    }
+
+    return allowed;
+  };
 
   const subModules: any[] = [
     { id: "kanban", label: "Darbai", icon: AlertCircle, module: "darbai" },
+    { id: "periodiniai", label: "Periodiniai darbai", icon: RefreshCcw, module: "periodiniai" },
     { id: "orders", label: "Užsakymai", icon: ShoppingCart },
     { id: "analytics", label: "Analitika", icon: BarChart3, module: "analytics" },
     { id: "audit", label: "Auditas", icon: History, module: "audit" },
@@ -5969,7 +5986,6 @@ ${task.updatedBy}
       icon: TrendingUp,
       module: "ceo",
       route: "ceo",
-      role: ["OPS", "ADMIN", "CEO"],
     },
     {
       id: "ops-flow",
@@ -5985,6 +6001,14 @@ ${task.updatedBy}
       icon: AlertCircle,
       module: "darbai",
       route: "darbai",
+      children: [],
+    },
+    {
+      id: "periodiniai",
+      label: "Periodiniai darbai",
+      icon: RefreshCcw,
+      module: "periodiniai",
+      route: "periodiniai",
       children: [],
     },
     {
@@ -6023,6 +6047,13 @@ ${task.updatedBy}
     },
   ];
 
+  const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
+  const filteredSidebarItems = sidebarItems.filter((item) => {
+    if (item.hidden) return false;
+    return hasModulePermission(item.module);
+  });
+  const finalSidebarItems = isSuperAdmin ? sidebarItems : filteredSidebarItems;
+
 
   const activeSubmodule =
     subModules.find((s) => s.id === activeTab) || subModules[0];
@@ -6037,7 +6068,7 @@ ${task.updatedBy}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-slate-900/60 z-[60] lg:hidden"
+            className="fixed inset-0 bg-slate-900/60 z-[60] md:hidden"
           />
         )}
       </AnimatePresence>
@@ -6045,8 +6076,8 @@ ${task.updatedBy}
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-[70] w-72 bg-black text-white flex flex-col transition-transform duration-300 lg:static lg:translate-x-0 shadow-2xl lg:shadow-none",
-          isSidebarOpen ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 left-0 z-[70] w-72 shrink-0 bg-black text-white flex flex-col transition-transform duration-300 md:static md:translate-x-0 shadow-2xl md:shadow-none",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         )}
       >
         <div className="p-6 border-b border-white/10 flex items-center justify-between">
@@ -6059,7 +6090,7 @@ ${task.updatedBy}
             </span>
           </div>
           <button
-            className="lg:hidden text-white/50 hover:text-white"
+            className="md:hidden text-white/50 hover:text-white"
             onClick={() => setIsSidebarOpen(false)}
           >
             <X size={20} />
@@ -6067,14 +6098,7 @@ ${task.updatedBy}
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {sidebarItems
-            .filter((item) => {
-              if (item.hidden) return false;
-              if (!hasModulePermission(item.module)) return false;
-              if (!item.role) return true;
-              const roles = Array.isArray(item.role) ? item.role : [item.role];
-              return roles.includes(currentUser.role);
-            })
+          {finalSidebarItems
             .map((item, idx) => {
               if (item.type === "header") {
                 return (
@@ -6297,7 +6321,7 @@ ${task.updatedBy}
           <div className="flex items-center gap-4">
             <button
               onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
             >
               <Menu size={24} />
             </button>
@@ -6362,7 +6386,7 @@ ${task.updatedBy}
             {activeModule === "darbai" && (
               <button
                 onClick={() => setIsFilterModalOpen(true)}
-                className="lg:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
+                className="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-xl transition-all"
               >
                 <Filter size={20} />
               </button>
@@ -6998,6 +7022,24 @@ ${task.updatedBy}
                           </motion.div>
                         </div>
                       </DragDropContext>
+                    )}
+
+                    {activeTab === "periodiniai" && (
+                      <PeriodicModule
+                        faults={scopedTasks}
+                        history={periodicHistory}
+                        templates={appPeriodicTemplates}
+                        clubs={appClubs}
+                        activeTab={activePeriodicTab}
+                        onTabChange={setActivePeriodicTab}
+                        onOpenCard={(id) => {
+                          const task = tasks.find((item) => item.id === id);
+                          if (task) {
+                            setSelectedFault(task);
+                            setIsDetailPanelOpen(true);
+                          }
+                        }}
+                      />
                     )}
 
                     {activeTab === "analytics" && (
