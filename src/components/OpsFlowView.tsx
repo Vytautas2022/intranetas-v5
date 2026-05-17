@@ -1,9 +1,8 @@
 
 import React from 'react';
-import { motion } from 'motion/react';
 import { Fault, Status } from '../types/faults';
-import { cn } from '../lib/utils';
 import { ArrowRight } from 'lucide-react';
+import { formatWorkflowStatusLabel } from '../logic/statusLabels';
 
 interface Props {
   tasks: Fault[];
@@ -43,7 +42,7 @@ export const OpsFlowView: React.FC<Props> = React.memo(({ tasks, onNavigateTo })
                 onClick={() => onNavigateTo(status, type)}
                 className="w-full md:w-40 p-4 rounded-xl bg-white border border-slate-200 shadow-sm hover:border-brand-lime transition-colors text-center"
               >
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{status}</div>
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{formatWorkflowStatusLabel(status)}</div>
                 <div className="text-2xl font-black text-slate-900">{count}</div>
               </button>
               {idx < FLOW_STEPS[type].length - 1 && (

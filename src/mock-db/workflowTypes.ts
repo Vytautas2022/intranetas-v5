@@ -89,8 +89,8 @@ export interface WorkflowType {
 const defaultStatuses: WorkflowStatusConfig[] = [
   { id: "Naujas", label: "Naujas" },
   { id: "Vykdoma", label: "Vykdoma" },
-  { id: "Laukiama detalių", label: "Laukiama detalių" },
-  { id: "Sutvarkyta", label: "Sutvarkyta", terminal: true },
+  { id: "Laukiama detalių", label: "Laukiama" },
+  { id: "Sutvarkyta", label: "Atlikta", terminal: true },
   { id: "Atmesta", label: "Atmesta", terminal: true },
   { id: "Kada nors", label: "Kada nors" },
 ];

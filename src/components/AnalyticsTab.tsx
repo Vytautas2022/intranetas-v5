@@ -227,10 +227,10 @@ export const AnalyticsTab = ({ data, dateFrom, dateTo, setDateFrom, setDateTo, o
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[
-            { label: 'Šiuo metu laukia detalių', value: data.stats.waitingDetailsMetrics.currentCount, icon: Clock, color: 'amber', desc: 'Darbai, esantys „Laukiama detalių“' },
+            { label: 'Šiuo metu laukia', value: data.stats.waitingDetailsMetrics.currentCount, icon: Clock, color: 'amber', desc: 'Darbai, esantys „Laukiama“' },
             { label: 'Pateko į laukimą', value: data.stats.waitingDetailsMetrics.percentage, unit: '%', icon: Share2, color: 'blue', desc: 'Dalis darbų, nors kartą patekusių į šią būseną' },
             { label: 'Vid. laikas laukiant', value: data.stats.waitingDetailsMetrics.avgDays, unit: 'd.', icon: Calendar, color: 'slate', desc: 'Kiek vidutiniškai laiko praleidžiama laukiant detalių' },
-            { label: 'Vėluoja laukiant', value: data.stats.waitingDetailsMetrics.overdueCount, icon: AlertCircle, color: 'red', desc: 'Darbai būsenoje „Laukiama detalių“ su vėluojančiu SLA' }
+            { label: 'Vėluoja laukiant', value: data.stats.waitingDetailsMetrics.overdueCount, icon: AlertCircle, color: 'red', desc: 'Darbai būsenoje „Laukiama“ su vėluojančiu SLA' }
           ].map(metric => (
             <div key={metric.label} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex justify-between items-start mb-4">
@@ -295,7 +295,7 @@ export const AnalyticsTab = ({ data, dateFrom, dateTo, setDateFrom, setDateTo, o
               Pasikartojantys strigimai (Darbai)
             </h3>
             <p className="text-xs text-slate-400 mb-6">
-              Darbai, kurie į „Laukiama detalių“ buvo grąžinti daugiau nei vieną kartą.
+              Darbai, kurie į „Laukiama“ buvo grąžinti daugiau nei vieną kartą.
             </p>
             <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
               <span className="text-5xl font-black text-slate-900 mb-2">{data.stats.waitingDetailsMetrics.repeatedCount}</span>

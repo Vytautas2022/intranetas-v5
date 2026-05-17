@@ -227,7 +227,7 @@ export const PeriodicDecisionBlock: React.FC<{
                 : "bg-white border-slate-200 hover:bg-amber-50 text-slate-600"
             )}
           >
-            <span>Reikia atlikti veiksmą / Sutvarkyta</span>
+            <span>Reikia atlikti veiksmą / Atlikta</span>
             {decision === 'ACTION_NEEDED' && <AlertTriangle size={14} />}
           </button>
         </div>

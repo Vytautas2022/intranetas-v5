@@ -119,7 +119,7 @@ export const WaitingForPartsModal: React.FC<WaitingForPartsModalProps> = ({
 
   const title = isBulk 
     ? "Atnaujinti kelis darbus" 
-    : (isExtensionOnly ? "SLA pratęsimas" : "Laukiama detalių – nurodykite veiksmus");
+    : (isExtensionOnly ? "SLA pratęsimas" : "Laukiama – nurodykite veiksmus");
 
   const submitLabel = isBulk ? "Atnaujinti" : (isExtensionOnly ? "Pratęsti SLA" : "Patvirtinti perkėlimą");
 
@@ -276,4 +276,3 @@ export const WaitingForPartsModal: React.FC<WaitingForPartsModalProps> = ({
     </AnimatePresence>
   );
 };
-

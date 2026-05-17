@@ -128,6 +128,7 @@ import {
 } from "./logic/notificationLogic";
 import { getRemainingTime, checkSLA, getSLAHeat } from "./logic/slaLogic";
 import { rejectFault, validateStatusChange } from "./logic/statusLogic";
+import { formatWorkflowStatusLabel } from "./logic/statusLabels";
 import { getSOP } from "./logic/sopLogic";
 import { users } from "./mock-db/users";
 import type { User } from "./mock-db/users";
@@ -196,6 +197,19 @@ import { PeriodicTaskProvider } from "./modules/periodic-tasks/PeriodicTaskConte
 import { PeriodicAdminModule } from "./modules/periodic/PeriodicAdminModule";
 import { PeriodicModule } from "./modules/periodic/PeriodicModule";
 import { ZmonesOrgModule } from "./modules/zmones-org/ZmonesOrgModule";
+import {
+  getActiveModuleIdForPath,
+  getActiveTabIdForPath,
+  getRouteSyncPath,
+} from "./modules/moduleRegistry";
+import { AppSidebar } from "./components/sidebar/AppSidebar";
+import {
+  getActiveSubmodule,
+  getFilteredSidebarItems,
+  getSidebarItems,
+  getSidebarSubModules,
+  getSidebarTitle,
+} from "./components/sidebar/sidebarLogic";
 import { PeriodicDecisionBlock } from "./components/PeriodicDecisionBlock";
 import { generatePeriodicTasks } from "./logic/periodicGeneratorLogic";
 import { generatePeriodicWorksForClub } from "./logic/periodicWorkGenerator";
@@ -278,7 +292,6 @@ const PriorityBadge = ({ priority }: { priority: string }) => {
     </span>
   );
 };
-
 const NotificationIcon = ({
   type,
 }: {
@@ -311,7 +324,7 @@ const StatusBadge = ({ status, role }: { status: string; role: string }) => {
   const displayStatus =
     isCoordinator && (status === "NAUJAS" || status === Status.NEW)
       ? "LAUKIAMA"
-      : status;
+      : formatWorkflowStatusLabel(status);
 
   return (
     <div
@@ -321,7 +334,7 @@ const StatusBadge = ({ status, role }: { status: string; role: string }) => {
           ? "bg-slate-100 text-slate-600"
           : status === "VYKDOMA" || status === Status.IN_PROGRESS
             ? "bg-amber-100 text-amber-700"
-            : status === "Sutvarkyta" || status === Status.FIXED
+            : status === Status.FIXED
               ? "bg-slate-100 text-slate-700"
               : status === Status.REJECTED
                 ? "bg-red-100 text-red-700"
@@ -1603,7 +1616,7 @@ const FaultDetailPanel = ({
                         "Atmesta",
                       ].map((s) => (
                         <option key={`order-status-${s}`} value={s}>
-                          {s}
+                          {formatWorkflowStatusLabel(s)}
                         </option>
                       ))
                     : Object.values(Status)
@@ -1617,7 +1630,7 @@ const FaultDetailPanel = ({
                         })
                         .map((s) => (
                           <option key={`fault-status-${s}`} value={s}>
-                            {s}
+                            {formatWorkflowStatusLabel(s)}
                           </option>
                         ))}
                 </select>
@@ -1863,7 +1876,7 @@ const FaultDetailPanel = ({
               {fault.status === Status.WAITING_DETAILS && (
                 <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex flex-col gap-2">
                   <h3 className="text-[10px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-2">
-                    <Clock size={14} /> Laukiama detalių informacijos
+                    <Clock size={14} /> Laukiama informacijos
                   </h3>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
@@ -2759,7 +2772,7 @@ const FaultDetailPanel = ({
                         { k: "C", d: "komentaras" },
                         { k: "M", d: "keisti statusą" },
                         { k: "V", d: "į Vykdoma" },
-                        { k: "S", d: "į Sutvarkyta" },
+                        { k: "S", d: "į Atlikta" },
                         { k: "Esc", d: "uždaryti" },
                       ].map((s) => (
                         <div
@@ -3373,7 +3386,7 @@ const TaskDetailView = ({
                 <div className="flex items-center gap-2">
                   <PriorityBadge priority={task.priority} />
                   <div className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-bold uppercase tracking-wider">
-                    {task.status}
+                    {formatWorkflowStatusLabel(task.status)}
                   </div>
                 </div>
                 <h2 className="text-2xl sm:text-3xl font-black text-slate-900 leading-tight">
@@ -3549,35 +3562,11 @@ function MainApp() {
   >("ALL");
 
   const activeModule: string = useMemo(() => {
-    const path = location.pathname.toLowerCase();
-    if (path.includes("/ceo")) return "ceo";
-    if (path.includes("/ops-flow")) return "ops-flow";
-    if (path.includes("/zmones")) return "zmones";
-    if (path.includes("/admin")) return "admin";
-    return "darbai";
+    return getActiveModuleIdForPath(location.pathname);
   }, [location.pathname]);
 
   const activeTab: string = useMemo(() => {
-    const path = location.pathname.toLowerCase();
-    if (path.includes("/ceo")) return "ceo";
-    if (path.includes("/ops-flow")) return "ops-flow";
-    if (path.includes("/analitika")) return "analytics";
-    if (path.includes("/darbai")) return "kanban";
-    if (path.includes("/periodiniai")) return "periodiniai";
-    if (path.includes("/admin/miestai")) return "admin-cities";
-    if (path.includes("/admin/padaliniai")) return "admin-clubs";
-    if (path.includes("/admin/vartotojai")) return "admin-users";
-    if (path.includes("/admin/treniruokliai")) return "admin-equipment";
-    if (path.includes("/admin/patalpu")) return "admin-facility";
-    if (path.includes("/admin/gedimo-tipai")) return "admin-issues";
-    if (path.includes("/admin/uzsakymai")) return "admin-inventory";
-    if (path.includes("/admin/periodiniai-sablonai"))
-      return "admin-periodic-templates";
-    if (path.includes("/admin/periodiniai")) return "admin-periodiniai";
-    if (path.includes("/admin/produktai")) return "admin-products";
-    if (path.includes("/admin/tiekėjai")) return "admin-suppliers";
-    if (path.includes("/zmones")) return "zmones";
-    return "kanban";
+    return getActiveTabIdForPath(location.pathname);
   }, [location.pathname]);
 
   const setActiveModule = (mod: string) => navigate("/" + mod);
@@ -3606,17 +3595,7 @@ function MainApp() {
   // Handle routing / URL synchronization
   useEffect(() => {
     const currentPath = window.location.pathname;
-    const viewMap: Record<string, string> = {
-      ceo: "/ceo",
-      "ops-flow": "/ops-flow",
-      kanban: "/darbai",
-      analytics: "/analitika",
-      audit: "/audit",
-      periodiniai: "/periodiniai",
-      admin: "/admin",
-    };
-
-    const targetPath = viewMap[activeTab];
+    const targetPath = getRouteSyncPath(activeTab);
     if (targetPath && !currentPath.includes(targetPath)) {
       window.history.pushState({}, "", targetPath);
     }
@@ -3851,7 +3830,7 @@ function MainApp() {
   >("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
   const [typeFilters, setTypeFilters] = useState<string[]>([]);
-  const [regStep, setRegStep] = useState<1 | 2 | 3>(1);
+  const [regStep, setRegStep] = useState<2 | 3>(2);
   const [regType, setRegType] = useState<string>("Darbas");
   const [activeModal, setActiveModal] = useState<
     "home" | "fault" | "other" | null
@@ -4582,7 +4561,7 @@ function MainApp() {
       }[],
     });
     setRegValidationErrors({});
-    setRegStep(1);
+    setRegStep(2);
     setUploadError(null);
   };
 
@@ -4901,7 +4880,7 @@ function MainApp() {
       }
 
       setActiveModal(null);
-      setRegStep(1);
+      setRegStep(2);
       return;
     }
 
@@ -5121,7 +5100,7 @@ function MainApp() {
     setFaults([newFault, ...faults]);
     logAudit(newFault.id, "created", "Užregistruotas naujas gedimas");
     setActiveModal(null);
-    setRegStep(1);
+    setRegStep(2);
     setUploadError(null);
     setRegValidationErrors({});
     resetRegForm();
@@ -5508,7 +5487,7 @@ ${task.updatedBy}
         ? "MOVED_TO_WAITING_DETAILS"
         : "SLA_EXTENDED";
       let msg = isFirstTime
-        ? `Gedimas perkeltas į „Laukiama detalių“. Naujas SLA terminas: ${data.dueDate}. Sekantis veiksmas: ${data.nextAction}.`
+        ? `Gedimas perkeltas į „Laukiama“. Naujas SLA terminas: ${data.dueDate}. Sekantis veiksmas: ${data.nextAction}.`
         : `SLA pratęstas iki ${data.dueDate}.`;
 
       if (data.reason) {
@@ -5949,358 +5928,38 @@ ${task.updatedBy}
     }
   };
 
-  const hasModulePermission = (moduleId?: string) => {
-    if (!moduleId) return true;
-
-    const permissions = currentUser.modulePermissions || [];
-    const hasConfig = permissions.length > 0;
-    const allowed = permissions.includes(moduleId as any);
-
-    if (!hasConfig) {
-      return currentUser.role === "SUPER_ADMIN";
-    }
-
-    return allowed;
-  };
-
-  const subModules: any[] = [
-    { id: "kanban", label: "Darbai", icon: AlertCircle, module: "darbai" },
-    { id: "periodiniai", label: "Periodiniai darbai", icon: RefreshCcw, module: "periodiniai" },
-    { id: "orders", label: "Užsakymai", icon: ShoppingCart },
-    { id: "analytics", label: "Analitika", icon: BarChart3, module: "analytics" },
-    { id: "audit", label: "Auditas", icon: History, module: "audit" },
-  ].filter(
-    (tab: any) =>
-      hasModulePermission(tab.module || tab.id) &&
-      (!tab.role ||
-        (Array.isArray(tab.role)
-          ? tab.role.includes(currentUser.role as string)
-          : currentUser.role === tab.role)),
+  const subModules = getSidebarSubModules(currentUser);
+  const sidebarItems = getSidebarItems();
+  const finalSidebarItems = getFilteredSidebarItems(currentUser, sidebarItems);
+  const activeSubmodule = getActiveSubmodule(subModules, activeTab);
+  const sidebarTitle = getSidebarTitle(
+    sidebarItems,
+    location.pathname,
+    activeModule,
   );
-
-  const sidebarItems = [
-    { type: "header", label: "Pagrindinis meniu" },
-    {
-      id: "ceo",
-      label: "CEO Skydas",
-      icon: TrendingUp,
-      module: "ceo",
-      route: "ceo",
-    },
-    {
-      id: "ops-flow",
-      label: "Procesų flow",
-      icon: LayoutDashboard,
-      module: "ops-flow",
-      route: "ops-flow",
-      hidden: true,
-    },
-    {
-      id: "darbai",
-      label: "Sporto klubų darbai",
-      icon: AlertCircle,
-      module: "darbai",
-      route: "darbai",
-      children: [],
-    },
-    {
-      id: "periodiniai",
-      label: "Periodiniai darbai",
-      icon: RefreshCcw,
-      module: "periodiniai",
-      route: "periodiniai",
-      children: [],
-    },
-    {
-      id: "zmones",
-      label: "Žmonės ir organizacija",
-      icon: Users2,
-      module: "zmones",
-      route: "zmones",
-      children: [],
-    },
-    {
-      id: "analytics",
-      label: "Analitika",
-      icon: BarChart3,
-      module: "darbai",
-      route: "analitika",
-      tab: "analytics",
-      hidden: true,
-    },
-    {
-      id: "audit",
-      label: "Auditas",
-      icon: History,
-      module: "darbai",
-      route: "audit",
-      tab: "audit",
-      hidden: true,
-    },
-
-    {
-      id: "admin",
-      label: "Sistemos administravimas",
-      icon: Settings,
-      module: "admin",
-      route: "admin",
-    },
-  ];
-
-  const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
-  const filteredSidebarItems = sidebarItems.filter((item) => {
-    if (item.hidden) return false;
-    return hasModulePermission(item.module);
-  });
-  const finalSidebarItems = isSuperAdmin ? sidebarItems : filteredSidebarItems;
-
-
-  const activeSubmodule =
-    subModules.find((s) => s.id === activeTab) || subModules[0];
 
   return (
     <div className="min-h-screen bg-white text-slate-800 font-sans flex overflow-hidden">
-      {/* Sidebar Overlay (Mobile) */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-slate-900/60 z-[60] md:hidden"
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar */}
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-[70] w-72 shrink-0 bg-black text-white flex flex-col transition-transform duration-300 md:static md:translate-x-0 shadow-2xl md:shadow-none",
-          isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
-        )}
-      >
-        <div className="p-6 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-brand-lime rounded-xl flex items-center justify-center font-black text-sm text-black">
-              S
-            </div>
-            <span className="font-black text-lg uppercase tracking-tight">
-              Sportgates
-            </span>
-          </div>
-          <button
-            className="md:hidden text-white/50 hover:text-white"
-            onClick={() => setIsSidebarOpen(false)}
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {finalSidebarItems
-            .map((item, idx) => {
-              if (item.type === "header") {
-                return (
-                  <p
-                    key={`sidebar-header-${idx}`}
-                    className="px-3 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em] mb-3 mt-8 first:mt-2"
-                  >
-                    {item.label}
-                  </p>
-                );
-              }
-
-              if (item.type === "group") {
-                const isExpanded = expandedGroups.includes(item.id);
-
-                return (
-                  <div key={item.id} className="space-y-1">
-                    <button
-                      onClick={() => {
-                        console.log("Clicked:", item.id);
-                        if (item.children && item.children.length > 0) {
-                          toggleExpand(item.id);
-                        } else {
-                          if (item.module) setActiveModule(item.module as any);
-                          if (item.tab) setActiveTab(item.tab as any);
-                        }
-                        setIsSidebarOpen(false);
-                      }}
-                      className={cn(
-                        "w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold text-sm transition-all group text-left",
-                        activeTab.startsWith(item.id)
-                          ? "bg-white/10 text-white"
-                          : "text-white/50 hover:bg-white/5 hover:text-white",
-                      )}
-                    >
-                      {item.icon && (
-                        <item.icon
-                          size={18}
-                          className={cn(
-                            "transition-colors",
-                            activeTab.startsWith(item.id)
-                              ? "text-white"
-                              : "text-white/30 group-hover:text-white",
-                          )}
-                        />
-                      )}
-                      <span>{item.label}</span>
-                      <ChevronRight
-                        size={14}
-                        className={cn(
-                          "ml-auto transition-transform",
-                          isExpanded && "rotate-90",
-                        )}
-                      />
-                    </button>
-                    {/* Submodules hidden */}
-                    <AnimatePresence>
-                      {isExpanded && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="pl-12 space-y-1 py-1">
-                            {item.children?.map((child) => {
-                              if (child.children) {
-                                return (
-                                  <div key={child.id} className="space-y-1">
-                                    <div className="flex items-center gap-3 py-2 text-xs font-bold text-white/40">
-                                      {child.icon && <child.icon size={14} />}
-                                      <span>{child.label}</span>
-                                    </div>
-                                    <div className="pl-6 space-y-1">
-                                      {child.children.map((subChild) => (
-                                        <button
-                                          key={subChild.id}
-                                          onClick={() => {
-                                            setActiveModule("darbai");
-                                            setActiveTab(subChild.tab as any);
-                                            setIsSidebarOpen(false);
-                                          }}
-                                          className={cn(
-                                            "w-full flex items-center gap-3 py-2 text-[11px] font-bold transition-colors text-left",
-                                            activeTab === subChild.tab
-                                              ? "text-brand-lime"
-                                              : "text-white/30 hover:text-brand-lime",
-                                          )}
-                                        >
-                                          {subChild.label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                );
-                              }
-                              return (
-                                <button
-                                  key={child.id}
-                                  onClick={() => {
-                                    setActiveModule("darbai");
-                                    setActiveTab(child.tab as any);
-                                    if ((child as any).subTab) {
-                                      if (child.tab === "periodic") {
-                                        setActivePeriodicTab(
-                                          (child as any).subTab,
-                                        );
-                                      }
-                                    } else if (child.tab === "periodic") {
-                                      setActivePeriodicTab("calendar");
-                                    }
-                                    setIsSidebarOpen(false);
-                                  }}
-                                  className={cn(
-                                    "w-full flex items-center gap-3 py-2 text-xs font-bold transition-colors text-left",
-                                    activeTab === child.tab &&
-                                      (!(child as any).subTab ||
-                                        (child.tab === "periodic" &&
-                                          activePeriodicTab ===
-                                            (child as any).subTab))
-                                      ? "text-brand-lime"
-                                      : "text-white/40 hover:text-brand-lime",
-                                  )}
-                                >
-                                  {child.icon && <child.icon size={14} />}
-                                  {child.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                );
-              }
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    navigate("/" + item.route);
-                    setIsSidebarOpen(false);
-                  }}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold text-sm transition-all group text-left",
-                    item.route && location.pathname.includes("/" + item.route)
-                      ? "bg-brand-lime text-black shadow-lg shadow-brand-lime/20"
-                      : "text-white/50 hover:bg-white/5 hover:text-white",
-                  )}
-                >
-                  {item.icon && (
-                    <item.icon
-                      size={18}
-                      className={cn(
-                        "transition-transform group-hover:scale-110",
-                        item.route &&
-                          location.pathname.includes("/" + item.route)
-                          ? "text-black"
-                          : "text-white/30",
-                      )}
-                    />
-                  )}
-                  {item.label}
-                  {item.route &&
-                    location.pathname.includes("/" + item.route) && (
-                      <ChevronRight size={14} className="ml-auto" />
-                    )}
-                </button>
-              );
-            })}
-        </nav>
-
-        <div className="p-4 border-t border-white/10 bg-white/5">
-          <div className="flex items-center gap-3 px-2 py-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-lime flex items-center justify-center font-black text-sm uppercase text-black">
-              {currentUser.name
-                .split(" ")
-                .map((n) => n[0])
-                .join("")}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold truncate">{currentUser.name}</p>
-              <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">
-                {currentUser.role}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              logout();
-              navigate("/login", { replace: true });
-              setIsSidebarOpen(false);
-            }}
-            className="mt-2 w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-black text-white/50 hover:bg-white/5 hover:text-white transition-all"
-          >
-            <LogOut size={17} className="text-white/30" />
-            Atsijungti
-          </button>
-        </div>
-      </aside>
-
+      <AppSidebar
+        isOpen={isSidebarOpen}
+        setIsOpen={setIsSidebarOpen}
+        items={finalSidebarItems}
+        expandedGroups={expandedGroups}
+        toggleExpand={toggleExpand}
+        activeTab={activeTab}
+        activePeriodicTab={activePeriodicTab}
+        setActivePeriodicTab={setActivePeriodicTab}
+        setActiveModule={setActiveModule}
+        setActiveTab={setActiveTab}
+        navigateToRoute={(route) => navigate("/" + route)}
+        pathname={location.pathname}
+        currentUser={currentUser}
+        onLogout={() => {
+          logout();
+          navigate("/login", { replace: true });
+          setIsSidebarOpen(false);
+        }}
+      />
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 relative h-screen overflow-hidden">
         {showQrReport && (
@@ -6328,16 +5987,10 @@ ${task.updatedBy}
 
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-black tracking-tight text-black hidden sm:block">
-                {sidebarItems.find(
-                  (i) =>
-                    i.route &&
-                    location.pathname.toLowerCase().includes("/" + i.route),
-                )?.label ||
-                  sidebarItems.find((i) => i.id === activeModule)?.label ||
-                  "Pagrindinis"}
+                {sidebarTitle}
               </h1>
 
-              {activeModule === "darbai" && (
+              {activeModule === "darbai" && activeSubmodule && (
                 <>
                   <div className="w-px h-6 bg-slate-200 mx-2 hidden lg:block" />
 
@@ -6924,7 +6577,7 @@ ${task.updatedBy}
                                 <KanbanColumn
                                   key={`col-${status}`}
                                   id={status}
-                                  title={status}
+                                  title={formatWorkflowStatusLabel(status)}
                                   count={columnFaults.length}
                                   currentUserRole={currentUser.role}
                                   columnFaults={columnFaults}
@@ -7661,13 +7314,13 @@ ${task.updatedBy}
                       <button
                         onClick={() => {
                           if (regStep === 3) {
-                            setRegStep(1);
+                            setActiveModal("home");
                           } else {
                             // Step 2
                             if (regForm.orderCategory) {
                               setRegStep(3);
                             } else {
-                              setRegStep(1);
+                              setActiveModal("home");
                             }
                           }
                         }}
@@ -7677,15 +7330,13 @@ ${task.updatedBy}
                       </button>
                     )}
                     <h3 className="text-lg font-bold">
-                      {regStep === 1
-                        ? "Pasirinkite registracijos tipą"
-                        : regForm.category === "ORDER" ||
-                            regForm.orderCategory ||
-                            regStep === 3
-                          ? regForm.orderCategory
-                            ? `Užsakymai: ${regType}`
-                            : "Užsakymai"
-                          : `Registruoti: ${regType}`}
+                      {regForm.category === "ORDER" ||
+                      regForm.orderCategory ||
+                      regStep === 3
+                        ? regForm.orderCategory
+                          ? `Užsakymai: ${regType}`
+                          : "Užsakymai"
+                        : `Registruoti: ${regType}`}
                     </h3>
                   </div>
                   <button
@@ -8645,56 +8296,6 @@ ${task.updatedBy}
                           Šis užsakymas bus perduotas OPS komandai peržiūrai.
                         </p>
                       </div>
-                    </div>
-                  ) : regStep === 1 ? (
-                    <div className="grid grid-cols-3 gap-4">
-                      {[
-                        {
-                          id: "Darbas",
-                          icon: AlertCircle,
-                          color: "text-red-600",
-                          bg: "bg-red-50",
-                        },
-                        {
-                          id: "Užsakymas",
-                          icon: Upload,
-                          color: "text-black",
-                          bg: "bg-brand-lime/20",
-                        },
-                        {
-                          id: "Kita",
-                          icon: Filter,
-                          color: "text-slate-600",
-                          bg: "bg-slate-50",
-                        },
-                      ].map((type) => (
-                        <button
-                          key={type.id}
-                          onClick={() => {
-                            if (type.id === "Užsakymas") {
-                              setRegType("Užsakymas");
-                              setRegStep(3);
-                            } else {
-                              setRegType(type.id as any);
-                              setRegStep(2);
-                            }
-                          }}
-                          className="flex flex-col items-center justify-center p-8 border-2 border-slate-100 rounded-2xl hover:border-slate-300 hover:bg-slate-50 transition-all gap-4 group"
-                        >
-                          <div
-                            className={cn(
-                              "w-16 h-16 rounded-full flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform",
-                              type.bg,
-                              type.color,
-                            )}
-                          >
-                            <type.icon size={32} />
-                          </div>
-                          <span className="font-bold text-slate-700">
-                            {type.id}
-                          </span>
-                        </button>
-                      ))}
                     </div>
                   ) : (
                     <>
@@ -9888,7 +9489,7 @@ const KanbanColumn = React.memo(({
     currentUserRole === "Koordinatorius" &&
     (id === "NAUJAS" || id === Status.NEW)
       ? "LAUKIAMA"
-      : title;
+      : formatWorkflowStatusLabel(title);
 
   // Compute heat stats
   const heatStats = (columnFaults || []).reduce(
@@ -10127,9 +9728,7 @@ const FaultCard = React.memo(({
             {/* MIDDLE: Status and SLA */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 min-w-0 font-bold text-[9px] text-slate-400 uppercase tracking-tight">
-                {fault.status === Status.WAITING_DETAILS
-                  ? "LAUKIA INFO"
-                  : fault.status}
+                {formatWorkflowStatusLabel(fault.status)}
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
@@ -10515,3 +10114,4 @@ const ConversionModal = ({
     </AnimatePresence>
   );
 };
+
