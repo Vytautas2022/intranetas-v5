@@ -8,7 +8,7 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import type { Priority } from "../types/faults";
+import { Status, type Priority } from "../types/faults";
 
 export type WorkflowCategory = "DARBAI" | "KONTROLE" | "UZSAKYMAI" | "IDEJOS";
 
@@ -87,12 +87,12 @@ export interface WorkflowType {
 }
 
 const defaultStatuses: WorkflowStatusConfig[] = [
-  { id: "Naujas", label: "Naujas" },
-  { id: "Vykdoma", label: "Vykdoma" },
-  { id: "Laukiama detalių", label: "Laukiama" },
-  { id: "Sutvarkyta", label: "Atlikta", terminal: true },
-  { id: "Atmesta", label: "Atmesta", terminal: true },
-  { id: "Kada nors", label: "Kada nors" },
+  { id: Status.NEW, label: "Naujas" },
+  { id: Status.IN_PROGRESS, label: "Vykdoma" },
+  { id: Status.WAITING_DETAILS, label: "Laukiama" },
+  { id: Status.FIXED, label: "Atlikta", terminal: true },
+  { id: Status.REJECTED, label: "Atmesta", terminal: true },
+  { id: Status.SOMEDAY, label: "Kada nors" },
 ];
 
 const defaultPriorities: WorkflowPriorityConfig[] = [

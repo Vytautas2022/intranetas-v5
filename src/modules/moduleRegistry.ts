@@ -43,6 +43,36 @@ export interface ModuleRegistryItem {
   showInSubNavigation?: boolean;
 }
 
+export type AdminModuleTabId =
+  | "clubs"
+  | "facility"
+  | "equipment"
+  | "equipment_issues"
+  | "cities"
+  | "users"
+  | "inventory"
+  | "periodic_templates"
+  | "periodiniai"
+  | "workflow_types"
+  | "audit";
+
+export type AdminInventorySubTab =
+  | "products"
+  | "suppliers"
+  | "inventory_settings";
+
+export interface RouteRegistryItem {
+  path: string;
+  route: string;
+  moduleId: string;
+  component?: ModuleComponentKey;
+  activeModuleId?: string;
+  tabId?: string;
+  permissionKey?: ModulePermission | string;
+  adminTabId?: AdminModuleTabId;
+  adminInventorySubTab?: AdminInventorySubTab;
+}
+
 export const moduleRegistry: ModuleRegistryItem[] = [
   {
     moduleId: "ceo",
@@ -186,25 +216,105 @@ export const moduleRegistry: ModuleRegistryItem[] = [
   },
 ];
 
-const adminRouteTabs = [
-  { route: "/admin/miestai", tabId: "admin-cities" },
-  { route: "/admin/padaliniai", tabId: "admin-clubs" },
-  { route: "/admin/vartotojai", tabId: "admin-users" },
-  { route: "/admin/treniruokliai", tabId: "admin-equipment" },
-  { route: "/admin/patalpu", tabId: "admin-facility" },
-  { route: "/admin/gedimo-tipai", tabId: "admin-issues" },
-  { route: "/admin/uzsakymai", tabId: "admin-inventory" },
-  { route: "/admin/periodiniai-sablonai", tabId: "admin-periodic-templates" },
-  { route: "/admin/periodiniai", tabId: "admin-periodiniai" },
-  { route: "/admin/produktai", tabId: "admin-products" },
-  { route: "/admin/tiekėjai", tabId: "admin-suppliers" },
-  { route: "/admin/workflow-types", tabId: "admin-workflow_types" },
+type AdminRouteRegistryItem = Pick<
+  RouteRegistryItem,
+  "tabId" | "adminTabId" | "adminInventorySubTab"
+> & {
+  path?: string;
+  route?: string;
+};
+
+const getAdminRoutePath = (route: AdminRouteRegistryItem) =>
+  route.path || route.route || "/admin";
+
+const adminRouteRegistry: AdminRouteRegistryItem[] = [
+  { path: "/admin/miestai", tabId: "admin-cities", adminTabId: "cities" },
+  { path: "/admin/padaliniai", tabId: "admin-clubs", adminTabId: "clubs" },
+  { path: "/admin/vartotojai", tabId: "admin-users", adminTabId: "users" },
+  {
+    path: "/admin/treniruokliai",
+    tabId: "admin-equipment",
+    adminTabId: "equipment",
+  },
+  { path: "/admin/patalpu", tabId: "admin-facility", adminTabId: "facility" },
+  {
+    path: "/admin/gedimo-tipai",
+    tabId: "admin-issues",
+    adminTabId: "equipment_issues",
+  },
+  {
+    path: "/admin/uzsakymai",
+    tabId: "admin-inventory",
+    adminTabId: "inventory",
+  },
+  {
+    path: "/admin/periodiniai-sablonai",
+    tabId: "admin-periodic-templates",
+    adminTabId: "periodic_templates",
+  },
+  {
+    path: "/admin/periodiniai",
+    tabId: "admin-periodiniai",
+    adminTabId: "periodiniai",
+  },
+  {
+    path: "/admin/produktai",
+    tabId: "admin-products",
+    adminTabId: "inventory",
+    adminInventorySubTab: "products",
+  },
+  {
+    path: "/admin/tiekėjai",
+    tabId: "admin-suppliers",
+    adminTabId: "inventory",
+    adminInventorySubTab: "suppliers",
+  },
+  {
+    path: "/admin/workflow-types",
+    tabId: "admin-workflow_types",
+    adminTabId: "workflow_types",
+  },
+  { path: "/admin/auditas", tabId: "admin-audit", adminTabId: "audit" },
 ];
 
 const normalizePath = (path: string) => path.toLowerCase();
 
-const routeMatches = (path: string, route: string) =>
-  normalizePath(path).includes(`/${normalizePath(route)}`);
+const routePathMatches = (pathname: string, routePath: string) => {
+  const path = normalizePath(pathname).replace(/\/+$/, "") || "/";
+  const route = normalizePath(routePath).replace(/\/+$/, "") || "/";
+  return path === route || path.startsWith(`${route}/`);
+};
+
+export const routeRegistry: RouteRegistryItem[] = [
+  ...moduleRegistry.map((module) => ({
+    path: `/${module.route}`,
+    route: module.route,
+    moduleId: module.moduleId,
+    component: module.component,
+    activeModuleId: module.activeModuleId,
+    tabId: module.tabId || module.moduleId,
+    permissionKey: module.permissionKey,
+  })),
+  ...adminRouteRegistry.map((route) => {
+    const path = getAdminRoutePath(route);
+    return {
+      path,
+      route: path.replace(/^\//, ""),
+      moduleId: "admin",
+      component: "AdminModule" as ModuleComponentKey,
+      activeModuleId: "admin",
+      tabId: route.tabId,
+      permissionKey: "admin",
+      adminTabId: route.adminTabId,
+      adminInventorySubTab: route.adminInventorySubTab,
+    };
+  }),
+];
+
+const getRouteMatch = (pathname: string) =>
+  routeRegistry
+    .filter((route) => routePathMatches(pathname, route.path))
+    .sort((a, b) => b.path.length - a.path.length)[0];
 
 export const getSidebarModules = () =>
   moduleRegistry
@@ -217,30 +327,42 @@ export const getSubNavigationModules = () =>
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
 export const getActiveModuleIdForPath = (pathname: string): string => {
-  if (normalizePath(pathname).includes("/admin")) return "admin";
-
-  const match = moduleRegistry
-    .filter((module) => routeMatches(pathname, module.route))
-    .sort((a, b) => b.route.length - a.route.length)[0];
+  const match = getRouteMatch(pathname);
 
   return match?.activeModuleId || match?.moduleId || "darbai";
 };
 
 export const getActiveTabIdForPath = (pathname: string): string => {
-  const path = normalizePath(pathname);
-  const adminTab = adminRouteTabs.find((route) => path.includes(route.route));
-  if (adminTab) return adminTab.tabId;
-
-  const match = moduleRegistry
-    .filter((module) => routeMatches(pathname, module.route))
-    .sort((a, b) => b.route.length - a.route.length)[0];
+  const match = getRouteMatch(pathname);
 
   return match?.tabId || match?.moduleId || "kanban";
 };
 
 export const getRouteSyncPath = (tabId: string): string | undefined => {
-  const module = moduleRegistry.find(
+  const route = routeRegistry.find(
     (item) => item.tabId === tabId || item.moduleId === tabId,
   );
-  return module ? `/${module.route}` : undefined;
+  return route?.path;
 };
+
+export const getAdminTabRoutePath = (
+  tabId: AdminModuleTabId,
+): string | undefined => {
+  const route = adminRouteRegistry.find((item) => item.adminTabId === tabId);
+  return route ? getAdminRoutePath(route) : undefined;
+};
+
+export const getAdminTabIdForRouteTab = (
+  tabId: string,
+): AdminModuleTabId | undefined =>
+  routeRegistry.find((route) => route.tabId === tabId)?.adminTabId;
+
+export const getAdminInventorySubTabForRouteTab = (
+  tabId: string,
+): AdminInventorySubTab | undefined =>
+  routeRegistry.find((route) => route.tabId === tabId)?.adminInventorySubTab;
+
+export const getRouteTabIdForAdminTab = (
+  adminTabId: AdminModuleTabId,
+): string | undefined =>
+  adminRouteRegistry.find((route) => route.adminTabId === adminTabId)?.tabId;

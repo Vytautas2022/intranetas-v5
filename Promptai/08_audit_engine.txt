@@ -1,0 +1,28 @@
+Centralize audit logging into one reusable audit engine.
+
+Goal:
+Ensure all workflow/module changes use one consistent audit architecture.
+
+Tasks:
+- Consolidate duplicated audit systems
+- Normalize audit event structure
+- Preserve existing audit history
+- Preserve existing audit UI
+- Preserve existing module behavior
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped extraction only
+- Preserve permissions
+- Preserve mobile behavior
+- Preserve routing
+- Preserve current workflows
+
+Important:
+Do NOT redesign audit UI.
+Do NOT rewrite workflows.
+
+Expected result:
+One reusable audit engine shared across the platform.

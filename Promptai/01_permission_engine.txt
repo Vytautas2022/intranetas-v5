@@ -1,0 +1,37 @@
+Centralize the permission engine into one reusable permission system.
+
+Goal:
+Ensure sidebar, routing, module rendering, submodules, and UI visibility all use the SAME permission evaluation logic.
+
+Tasks:
+- Extract duplicated permission logic into one reusable permission engine
+- Unify:
+  - sidebar permission checks
+  - route access checks
+  - module rendering checks
+  - submodule visibility checks
+- Preserve current SUPER_ADMIN behavior
+- Preserve current role structure
+- Preserve current permissions behavior
+- Preserve existing module access rules
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped extraction only
+- Do not break existing modules
+- Do not redesign sidebar
+- Do not redesign routing
+- Preserve current UI/UX
+- Preserve current mobile behavior
+- Preserve System Administration architecture
+- Preserve backward compatibility
+
+Important:
+System Administration must remain the future single source of truth.
+
+Do NOT hardcode permissions.
+
+Expected result:
+One centralized reusable permission engine used consistently everywhere.

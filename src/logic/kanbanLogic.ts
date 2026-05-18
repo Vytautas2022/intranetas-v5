@@ -1,4 +1,5 @@
 import { Fault, StatusHistoryItem } from '../mock-db/faults';
+import { Status } from '../types/faults';
 
 /**
  * Creates a record of the initial status for a new fault.
@@ -8,7 +9,7 @@ export function createFaultHistory(user: string): StatusHistoryItem[] {
   return [
     {
       from: null,
-      to: "Naujas",
+      to: Status.NEW,
       date: now,
       user: user
     }
@@ -42,7 +43,7 @@ export function moveFault(fault: Fault, newStatus: string, user: string): void {
   fault.updatedAt = Date.now();
   
   // Also update closedAt if status is fixed
-  if (newStatus === 'Sutvarkyta') {
+  if (newStatus === Status.FIXED) {
     fault.closedAt = Date.now();
   }
 }

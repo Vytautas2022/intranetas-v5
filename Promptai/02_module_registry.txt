@@ -1,0 +1,34 @@
+Upgrade the Module Registry into the real runtime module source.
+
+Goal:
+Make the centralized module registry the authoritative runtime source for:
+- sidebar rendering
+- module loading
+- route mapping
+- permissions mapping
+- navigation metadata
+
+Tasks:
+- Connect runtime module rendering to the registry
+- Reduce duplicated module definitions
+- Ensure registry-driven module loading
+- Preserve existing modules and routes
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped changes only
+- Preserve current routing behavior
+- Preserve sidebar behavior
+- Preserve permissions behavior
+- Preserve mobile responsiveness
+- Do not redesign architecture
+- Do not break existing modules
+
+Important:
+Do NOT rewrite module internals.
+Only centralize module registration/runtime mapping safely.
+
+Expected result:
+Registry becomes the real runtime module source without changing UX.

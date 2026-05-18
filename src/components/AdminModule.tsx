@@ -51,6 +51,10 @@ import {
   workflowTypes as initialWorkflowTypes,
   WorkflowType,
 } from "../mock-db/workflowTypes";
+import {
+  getAdminTabRoutePath,
+  type AdminModuleTabId,
+} from "../modules/moduleRegistry";
 
 interface AdminModuleProps {
   products: Product[];
@@ -81,30 +85,8 @@ interface AdminModuleProps {
   workflowTypes?: WorkflowType[];
   setWorkflowTypes?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
   renderPeriodicModule?: () => React.ReactNode;
-  activeTab?:
-    | "clubs"
-    | "facility"
-    | "equipment"
-    | "equipment_issues"
-    | "cities"
-    | "users"
-    | "inventory"
-    | "periodic_templates"
-    | "periodiniai"
-    | "workflow_types";
-  onTabChange?: (
-    tab:
-      | "clubs"
-      | "facility"
-      | "equipment"
-      | "equipment_issues"
-      | "cities"
-      | "users"
-      | "inventory"
-      | "periodic_templates"
-      | "periodiniai"
-      | "workflow_types",
-  ) => void;
+  activeTab?: AdminModuleTabId;
+  onTabChange?: (tab: AdminModuleTabId) => void;
   inventorySubTab?: "products" | "suppliers" | "inventory_settings";
   onSubTabChange?: (
     tab: "products" | "suppliers" | "inventory_settings",
@@ -147,20 +129,6 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
   // console.log("Current route:", path);
 
-  const tabRoutes: Record<string, string> = {
-    cities: "/admin/miestai",
-    clubs: "/admin/padaliniai",
-    users: "/admin/vartotojai",
-    facility: "/admin/patalpu",
-    periodic_templates: "/admin/periodiniai-sablonai",
-    periodiniai: "/admin/periodiniai",
-    equipment: "/admin/treniruokliai",
-    equipment_issues: "/admin/gedimo-tipai",
-    inventory: "/admin/uzsakymai",
-    workflow_types: "/admin/workflow-types",
-    audit: "/admin/auditas",
-  };
-
   const tabs = [
     { id: "cities", label: "Miestai", icon: Building },
     { id: "clubs", label: "Padaliniai", icon: MapPin },
@@ -174,6 +142,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     { id: "audit", label: "Auditas", icon: FileText },
   ] as const;
 
+  const getTabRoute = (tabId: AdminModuleTabId) =>
+    getAdminTabRoutePath(tabId) || "/admin/vartotojai";
+
   return (
     <div className="p-0 md:p-6 min-h-full md:h-full flex flex-col gap-3 md:gap-6 bg-white md:bg-transparent">
       {/* Tabs */}
@@ -181,9 +152,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => navigate(tabRoutes[tab.id])}
+            onClick={() => navigate(getTabRoute(tab.id))}
             className={`flex items-center gap-2 px-3 py-2 font-semibold text-[13px] transition-colors rounded-lg whitespace-nowrap ${
-              path.includes(tabRoutes[tab.id])
+              path.includes(getTabRoute(tab.id))
                 ? "bg-slate-100 text-slate-900"
                 : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
             }`}
@@ -195,13 +166,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
       </div>
 
       <div className="flex-1 bg-white md:rounded-3xl md:border md:border-slate-200 md:shadow-sm flex flex-col min-h-0 w-full overflow-visible">
-        {path.includes(tabRoutes.cities) && (
+        {path.includes(getTabRoute("cities")) && (
           <CitiesAdmin cities={cities} setCities={setCities} />
         )}
-        {path.includes(tabRoutes.users) && (
+        {path.includes(getTabRoute("users")) && (
           <UsersAdmin users={users} setUsers={setUsers} clubs={clubs} />
         )}
-        {path.includes(tabRoutes.clubs) && (
+        {path.includes(getTabRoute("clubs")) && (
           <ClubsAdmin
             clubs={clubs}
             setClubs={setClubs}
@@ -211,14 +182,14 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setPeriodicTemplates={setPeriodicTemplates}
           />
         )}
-        {path.includes(tabRoutes.facility) && (
+        {path.includes(getTabRoute("facility")) && (
           <FacilityTemplatesAdmin
             templates={facilityTemplates}
             setTemplates={setFacilityTemplates}
             clubs={clubs}
           />
         )}
-        {path.includes(tabRoutes.periodic_templates) && (
+        {path.includes(getTabRoute("periodic_templates")) && (
           <PeriodicTemplatesAdmin
             templates={periodicTemplates}
             setTemplates={setPeriodicTemplates}
@@ -227,23 +198,23 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setClubTaskConfigs={setClubTaskConfigs}
           />
         )}
-        {path.includes(tabRoutes.periodiniai) && renderPeriodicModule && (
+        {path.includes(getTabRoute("periodiniai")) && renderPeriodicModule && (
           <div className="h-full">{renderPeriodicModule()}</div>
         )}
-        {path.includes(tabRoutes.equipment) && (
+        {path.includes(getTabRoute("equipment")) && (
           <EquipmentAdmin
             equipmentList={equipmentList}
             setEquipmentList={setEquipmentList}
             clubs={clubs}
           />
         )}
-        {path.includes(tabRoutes.equipment_issues) && (
+        {path.includes(getTabRoute("equipment_issues")) && (
           <EquipmentIssuesAdmin
             issues={equipmentIssueTypes}
             setIssues={setEquipmentIssueTypes}
           />
         )}
-        {path.includes(tabRoutes.inventory) && (
+        {path.includes(getTabRoute("inventory")) && (
           <ProcurementAdmin
             products={products}
             setProducts={setProducts}
@@ -256,13 +227,13 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             onSubTabChange={onSubTabChange as any}
           />
         )}
-        {path.includes(tabRoutes.workflow_types) && (
+        {path.includes(getTabRoute("workflow_types")) && (
           <WorkflowTypesAdmin
             workflows={workflowTypes}
             setWorkflows={setWorkflowTypes}
           />
         )}
-        {path.includes(tabRoutes.audit) && <AuditAdmin />}
+        {path.includes(getTabRoute("audit")) && <AuditAdmin />}
       </div>
     </div>
   );

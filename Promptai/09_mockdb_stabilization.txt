@@ -1,0 +1,28 @@
+Stabilize mock DB hydration and state synchronization architecture.
+
+Goal:
+Reduce stale localStorage state drift and duplicated state ownership.
+
+Tasks:
+- Analyze duplicated state ownership
+- Normalize hydration boundaries
+- Add safe mock DB version/hydration handling
+- Preserve existing behavior
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped stabilization only
+- Preserve current modules
+- Preserve current auth behavior
+- Preserve routing
+- Preserve permissions
+- Preserve mobile behavior
+
+Important:
+Do NOT redesign state architecture completely.
+Do NOT introduce backend/state libraries.
+
+Expected result:
+More stable mock DB hydration with reduced stale state issues.

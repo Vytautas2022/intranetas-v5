@@ -1,0 +1,28 @@
+Connect Kanban boards to reusable workflow configuration instead of hardcoded columns.
+
+Goal:
+Make Kanban architecture workflow-config driven.
+
+Tasks:
+- Derive Kanban columns from workflow configuration
+- Preserve existing drag/drop behavior
+- Preserve existing board visuals
+- Preserve current workflow logic
+- Preserve SLA indicators
+- Preserve filters and analytics
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped changes only
+- Preserve mobile behavior
+- Preserve permissions
+- Preserve existing workflow architecture
+- Do not redesign Kanban UI
+
+Important:
+System Administration workflow configuration must become the future source of board structure.
+
+Expected result:
+Kanban boards become reusable and configuration-driven.

@@ -128,7 +128,10 @@ import {
 } from "./logic/notificationLogic";
 import { getRemainingTime, checkSLA, getSLAHeat } from "./logic/slaLogic";
 import { rejectFault, validateStatusChange } from "./logic/statusLogic";
-import { formatWorkflowStatusLabel } from "./logic/statusLabels";
+import {
+  formatWorkflowStatusLabel,
+  normalizeWorkflowStatusId,
+} from "./logic/statusLabels";
 import { getSOP } from "./logic/sopLogic";
 import { users } from "./mock-db/users";
 import type { User } from "./mock-db/users";
@@ -200,7 +203,12 @@ import { ZmonesOrgModule } from "./modules/zmones-org/ZmonesOrgModule";
 import {
   getActiveModuleIdForPath,
   getActiveTabIdForPath,
+  getAdminInventorySubTabForRouteTab,
+  getAdminTabIdForRouteTab,
+  getAdminTabRoutePath,
   getRouteSyncPath,
+  getRouteTabIdForAdminTab,
+  type AdminModuleTabId,
 } from "./modules/moduleRegistry";
 import { AppSidebar } from "./components/sidebar/AppSidebar";
 import {
@@ -210,6 +218,7 @@ import {
   getSidebarSubModules,
   getSidebarTitle,
 } from "./components/sidebar/sidebarLogic";
+import { getRuntimeModuleForPath } from "./modules/moduleRuntime";
 import { PeriodicDecisionBlock } from "./components/PeriodicDecisionBlock";
 import { generatePeriodicTasks } from "./logic/periodicGeneratorLogic";
 import { generatePeriodicWorksForClub } from "./logic/periodicWorkGenerator";
@@ -244,6 +253,11 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/authContext";
+import {
+  canAccessModule,
+  canManageAllClubs,
+  canManagePeriodicTasks,
+} from "./logic/permissionEngine";
 
 const CLUBS = clubs;
 const SUPPLIERS = MOCK_SUPPLIERS;
@@ -3565,9 +3579,29 @@ function MainApp() {
     return getActiveModuleIdForPath(location.pathname);
   }, [location.pathname]);
 
+  const activeRuntimeModule = useMemo(
+    () => getRuntimeModuleForPath(location.pathname),
+    [location.pathname],
+  );
+
+  const activeComponent = activeRuntimeModule?.component || "DarbaiModule";
+
   const activeTab: string = useMemo(() => {
     return getActiveTabIdForPath(location.pathname);
   }, [location.pathname]);
+
+  const getAdminModuleTab = (tabId: string) =>
+    getAdminTabIdForRouteTab(tabId) || (tabId.replace("admin-", "") as any);
+
+  const navigateToAdminTab = (tab: AdminModuleTabId) =>
+    navigate(getAdminTabRoutePath(tab) || "/admin/vartotojai");
+
+  const setAdminRouteTab = (tab: AdminModuleTabId) => {
+    const routeTabId = getRouteTabIdForAdminTab(tab);
+    if (routeTabId) {
+      setActiveTab(routeTabId);
+    }
+  };
 
   const setActiveModule = (mod: string) => navigate("/" + mod);
   const setActiveTab = (tab: string) => navigate("/" + tab);
@@ -3621,6 +3655,25 @@ function MainApp() {
   const applyWorkflowMigration = (items: Fault[]): Fault[] =>
     items.map((item) => ({
       ...item,
+      status: normalizeWorkflowStatusId(item.status) as any,
+      history: (item.history || []).map((historyItem: any) => ({
+        ...historyItem,
+        oldStatus: historyItem.oldStatus
+          ? normalizeWorkflowStatusId(historyItem.oldStatus)
+          : historyItem.oldStatus,
+        newStatus: historyItem.newStatus
+          ? normalizeWorkflowStatusId(historyItem.newStatus)
+          : historyItem.newStatus,
+      })),
+      status_history: (item.status_history || []).map((historyItem: any) => ({
+        ...historyItem,
+        from: historyItem.from
+          ? normalizeWorkflowStatusId(historyItem.from)
+          : historyItem.from,
+        to: historyItem.to
+          ? normalizeWorkflowStatusId(historyItem.to)
+          : historyItem.to,
+      })),
       workflowTypeId:
         item.workflowTypeId ||
         getWorkflowTypeByLegacyCategory(item.category || item.type)?.id ||
@@ -3818,7 +3871,7 @@ function MainApp() {
   const [isSopModalOpen, setIsSopModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRegion, setSelectedRegion] = useState(
-    ["SUPER_ADMIN", "ADMIN", "OPS"].includes(currentUser.role)
+    canManageAllClubs(currentUser)
       ? "ALL"
       : currentUser.region,
   );
@@ -6171,8 +6224,8 @@ ${task.updatedBy}
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto bg-white pb-24 lg:pb-8 relative">
-          {activeModule === "ceo" ? (
-            !["OPS", "ADMIN", "SUPER_ADMIN"].includes(currentUser.role) ? (
+          {activeComponent === "CeoDashboard" ? (
+            !canAccessModule(currentUser, "ceo") ? (
               <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>
             ) : (
             <CeoDashboard
@@ -6198,23 +6251,27 @@ ${task.updatedBy}
               }}
             />
             )
-          ) : activeModule === "ops-flow" ? (
-            <OpsFlowView
-              tasks={faults}
-              onNavigateTo={(status, type) => {
-                setActiveModule("darbai");
-                setActiveTab("kanban" as any);
-                setTypeFilters([
-                  type === "gedimai"
-                    ? "FACILITY_FAULT"
-                    : type === "uzsakymai"
-                      ? "ORDER"
-                      : "OTHER",
-                ]); // Simplified mapping
-              }}
-            />
-          ) : activeModule === "admin" ? (
-            !["SUPER_ADMIN", "ADMIN", "OPS"].includes(currentUser.role) ? (
+          ) : activeComponent === "OpsFlowView" ? (
+            !canAccessModule(currentUser, "ops-flow") ? (
+              <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>
+            ) : (
+              <OpsFlowView
+                tasks={faults}
+                onNavigateTo={(status, type) => {
+                  setActiveModule("darbai");
+                  setActiveTab("kanban" as any);
+                  setTypeFilters([
+                    type === "gedimai"
+                      ? "FACILITY_FAULT"
+                      : type === "uzsakymai"
+                        ? "ORDER"
+                        : "OTHER",
+                  ]); // Simplified mapping
+                }}
+              />
+            )
+          ) : activeComponent === "AdminModule" ? (
+            !canAccessModule(currentUser, "admin") ? (
               <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>
             ) : (
             <AdminModule
@@ -6244,39 +6301,12 @@ ${task.updatedBy}
               workflowTypes={workflowTypes}
               setWorkflowTypes={setWorkflowTypes}
               renderPeriodicModule={() => <PeriodicAdminModule />}
-              onTabChange={(tab) => {
-                const mapping: Record<string, string> = {
-                  cities: "/admin/miestai",
-                  clubs: "/admin/padaliniai",
-                  users: "/admin/vartotojai",
-                  facility: "/admin/patalpu",
-                  periodic_templates: "/admin/periodiniai-sablonai",
-                  equipment: "/admin/treniruokliai",
-                  equipment_issues: "/admin/gedimo-tipai",
-                  inventory: "/admin/uzsakymai",
-                  workflow_types: "/admin/workflow-types",
-                };
-                navigate(mapping[tab] || "/admin/vartotojai");
-              }}
-              activeTab={
-                activeTab === "admin-products" ||
-                activeTab === "admin-suppliers" ||
-                activeTab === "admin-inventory-settings"
-                  ? "inventory"
-                  : activeTab === "admin-issues"
-                    ? "equipment_issues"
-                    : activeTab === "admin-periodic" ||
-                        activeTab === "admin-periodic-templates"
-                      ? "periodic_templates"
-                      : activeTab === "admin-facility"
-                        ? "facility"
-                        : activeTab === "admin-workflow_types"
-                          ? "workflow_types"
-                        : (activeTab.replace("admin-", "") as any)
-              }
+              onTabChange={navigateToAdminTab}
+              activeTab={getAdminModuleTab(activeTab)}
+              inventorySubTab={getAdminInventorySubTabForRouteTab(activeTab)}
             />
             )
-          ) : activeModule === "darbai" ? (
+          ) : activeComponent === "DarbaiModule" ? (
             <div className="h-full flex flex-col">
               {/* Filters Bar - Refactored for Minimal Clutter */}
               {activeTab === "kanban" && (
@@ -6555,7 +6585,7 @@ ${task.updatedBy}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: 20 }}
-                            className={["OPS", "ADMIN", "SUPER_ADMIN", "COORDINATOR"].includes(currentUser.role) ? "grid grid-cols-6 gap-4 items-start h-full" : "grid grid-cols-5 gap-4 items-start h-full"}
+                            className={canManagePeriodicTasks(currentUser) ? "grid grid-cols-6 gap-4 items-start h-full" : "grid grid-cols-5 gap-4 items-start h-full"}
                           >
                             {[
                               Status.NEW,
@@ -6563,7 +6593,7 @@ ${task.updatedBy}
                               Status.WAITING_DETAILS,
                               Status.FIXED,
                               Status.REJECTED,
-                              ...(["OPS", "ADMIN", "SUPER_ADMIN", "COORDINATOR"].includes(currentUser.role)
+                              ...(canManagePeriodicTasks(currentUser)
                                 ? [Status.SOMEDAY]
                                 : []),
                             ].map((status) => {
@@ -6761,48 +6791,12 @@ ${task.updatedBy}
                           workflowTypes={workflowTypes}
                           setWorkflowTypes={setWorkflowTypes}
                           renderPeriodicModule={() => <PeriodicAdminModule />}
-                          activeTab={
-                            activeTab === "admin-products" ||
-                            activeTab === "admin-suppliers" ||
-                            activeTab === "admin-inventory-settings"
-                              ? "inventory"
-                              : activeTab === "admin-issues"
-                                ? "equipment_issues"
-                                : activeTab === "admin-periodic-templates"
-                                  ? "periodic_templates"
-                                  : activeTab === "admin-periodiniai"
-                                    ? "periodiniai"
-                                  : activeTab === "admin-facility"
-                                      ? "facility"
-                                      : activeTab === "admin-workflow_types"
-                                        ? "workflow_types"
-                                      : (activeTab.replace("admin-", "") as any)
-                          }
-                          inventorySubTab={
-                            activeTab === "admin-products"
-                              ? "products"
-                              : activeTab === "admin-suppliers"
-                                ? "suppliers"
-                                : activeTab === "admin-inventory-settings"
-                                  ? "inventory_settings"
-                                  : undefined
-                          }
+                          activeTab={getAdminModuleTab(activeTab)}
+                          inventorySubTab={getAdminInventorySubTabForRouteTab(
+                            activeTab,
+                          )}
                           onTabChange={(tab) => {
-                            if (tab === "inventory") {
-                              setActiveTab("admin-products" as any);
-                            } else if (tab === "equipment_issues") {
-                              setActiveTab("admin-issues" as any);
-                            } else if (tab === "periodic_templates") {
-                              setActiveTab("admin-periodic-templates" as any);
-                            } else if (tab === "periodiniai") {
-                              setActiveTab("admin-periodiniai" as any);
-                            } else if (tab === "facility") {
-                              setActiveTab("admin-facility" as any);
-                            } else if (tab === "workflow_types") {
-                              setActiveTab("admin-workflow_types" as any);
-                            } else {
-                              setActiveTab(`admin-${tab}` as any);
-                            }
+                            setAdminRouteTab(tab);
                           }}
                           onSubTabChange={(sub) =>
                             setActiveTab(`admin-${sub}` as any)
@@ -6814,7 +6808,7 @@ ${task.updatedBy}
                 </div>
               </div>
             </div>
-          ) : activeModule === "zmones" ? (
+          ) : activeComponent === "ZmonesOrgModule" ? (
             <div className="h-full flex flex-col overflow-hidden">
               <ZmonesOrgModule onGeneratePeriodicTasks={handleGenerateWorks} />
             </div>
@@ -7153,7 +7147,7 @@ ${task.updatedBy}
                               setClubFilter("all");
                             }}
                             disabled={
-                              currentUser.role !== "OPS" &&
+                              !canManageAllClubs(currentUser) &&
                               region !== "ALL" &&
                               region !== currentUser.region
                             }
@@ -7162,7 +7156,7 @@ ${task.updatedBy}
                               selectedRegion === region
                                 ? "bg-slate-900 text-white border-slate-900 shadow-lg"
                                 : "bg-slate-50 text-slate-600 border-slate-100 hover:border-slate-300",
-                              currentUser.role !== "OPS" &&
+                              !canManageAllClubs(currentUser) &&
                                 region !== "ALL" &&
                                 region !== currentUser.region &&
                                 "opacity-50 cursor-not-allowed",
@@ -7187,7 +7181,7 @@ ${task.updatedBy}
                     >
                       <option value="all">Visi klubai</option>
                       {CLUBS.filter((c) => {
-                        if (currentUser.role !== "OPS")
+                        if (!canManageAllClubs(currentUser))
                           return c.region === currentUser.region;
                         return (
                           selectedRegion === "ALL" ||

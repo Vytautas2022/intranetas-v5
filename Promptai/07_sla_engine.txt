@@ -1,0 +1,28 @@
+Centralize SLA logic into one reusable SLA engine.
+
+Goal:
+Ensure all workflow modules calculate SLA consistently.
+
+Tasks:
+- Consolidate duplicated SLA logic
+- Normalize SLA calculations
+- Preserve existing SLA behavior
+- Preserve existing SLA visuals
+- Preserve current workflow behavior
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped extraction only
+- Preserve Kanban behavior
+- Preserve analytics
+- Preserve filters
+- Preserve permissions
+- Preserve mobile behavior
+
+Important:
+SLA engine must support future workflow configuration from System Administration.
+
+Expected result:
+One reusable SLA engine shared across all workflow modules.

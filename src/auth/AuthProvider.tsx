@@ -4,6 +4,10 @@ import { MOCK_PASSWORD, mockUsers } from "./mockUsers";
 import { users as systemUsers } from "../mock-db/users";
 import type { User } from "../mock-db/users";
 import type { AuthUser, ModulePermission } from "./types";
+import {
+  getDefaultModulePermissions,
+  normalizePermissionRole,
+} from "../logic/permissionEngine";
 
 const AUTH_STORAGE_KEY = "sg_auth_user_id";
 const SYSTEM_USERS_STORAGE_KEY = "app_users";
@@ -11,7 +15,7 @@ const ALLOWED_GOOGLE_DOMAINS = ["sportgates.lt"];
 const DEFAULT_GOOGLE_ROLE: User["role"] = "EXTERNAL";
 
 const normalizeEmail = (email?: string) => email?.trim().toLowerCase() ?? "";
-const normalizeRole = (role?: string) => (role || "EXTERNAL").trim().toUpperCase();
+const normalizeRole = normalizePermissionRole;
 const getGoogleUserId = (email: string) =>
   `google-${email.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 const getEmailDomain = (email: string) => email.split("@")[1] ?? "";
@@ -24,55 +28,12 @@ interface GoogleProfile {
   picture?: string;
 }
 
-const rolePermissions: Record<string, ModulePermission[]> = {
-  SUPER_ADMIN: [
-    "darbai",
-    "gedimai",
-    "periodiniai",
-    "admin",
-    "analytics",
-    "audit",
-    "orders",
-    "zmones",
-    "ceo",
-  ],
-  ADMIN: [
-    "darbai",
-    "gedimai",
-    "periodiniai",
-    "admin",
-    "analytics",
-    "audit",
-    "orders",
-    "zmones",
-    "ceo",
-  ],
-  OPS: [
-    "darbai",
-    "gedimai",
-    "periodiniai",
-    "admin",
-    "analytics",
-    "audit",
-    "orders",
-    "zmones",
-    "ceo",
-  ],
-  COORDINATOR: ["darbai", "gedimai", "periodiniai", "analytics", "orders"],
-  CS: ["darbai", "gedimai", "analytics", "zmones"],
-  ACCOUNTING: ["orders", "audit"],
-  EXTERNAL: ["darbai"],
-};
-
 type SystemUserRecord = User & {
   roleId?: string;
   permissions?: ModulePermission[];
   modulePermissions?: ModulePermission[];
   active?: boolean;
 };
-
-const getDefaultModulePermissions = (role?: string): ModulePermission[] =>
-  rolePermissions[normalizeRole(role)] || rolePermissions.EXTERNAL;
 
 const getConfiguredModulePermissions = (
   user: SystemUserRecord,

@@ -3,6 +3,11 @@ import {
   getSidebarModules,
   getSubNavigationModules,
 } from "../../modules/moduleRegistry";
+import {
+  canAccessPermission,
+  canSeeSidebarModule,
+  canSeeSubmodule,
+} from "../../logic/permissionEngine";
 
 export interface SidebarItem {
   type?: "header" | "group";
@@ -26,19 +31,7 @@ export interface SidebarSubModule {
 export const hasModulePermission = (
   currentUser: AuthUser,
   moduleId?: string,
-) => {
-  if (!moduleId) return true;
-
-  const permissions = currentUser.modulePermissions || [];
-  const hasConfig = permissions.length > 0;
-  const allowed = permissions.includes(moduleId as any);
-
-  if (!hasConfig) {
-    return currentUser.role === "SUPER_ADMIN";
-  }
-
-  return allowed;
-};
+) => canAccessPermission(currentUser, moduleId);
 
 export const getSidebarItems = (): SidebarItem[] => [
   { type: "header", label: "Pagrindinis meniu" },
@@ -58,13 +51,9 @@ export const getFilteredSidebarItems = (
   currentUser: AuthUser,
   sidebarItems: SidebarItem[],
 ) => {
-  const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
-  if (isSuperAdmin) return sidebarItems;
-
-  return sidebarItems.filter((item) => {
-    if (item.hidden) return false;
-    return hasModulePermission(currentUser, item.module);
-  });
+  return sidebarItems.filter((item) =>
+    canSeeSidebarModule(currentUser, item.module, item.hidden),
+  );
 };
 
 export const getSidebarSubModules = (
@@ -79,11 +68,11 @@ export const getSidebarSubModules = (
     }))
     .filter(
       (tab) =>
-        hasModulePermission(currentUser, tab.module) &&
-        (!(tab as any).role ||
-          (Array.isArray((tab as any).role)
-            ? (tab as any).role.includes(currentUser.role)
-            : currentUser.role === (tab as any).role)),
+        canSeeSubmodule(
+          currentUser,
+          tab.module,
+          (tab as any).role,
+        ),
     );
 
 export const getActiveSubmodule = (

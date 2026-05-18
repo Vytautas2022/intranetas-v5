@@ -1,0 +1,39 @@
+Stabilize workflow status architecture using immutable internal IDs and editable UI labels.
+
+Goal:
+Normalize workflow statuses across all workflow modules safely.
+
+Tasks:
+- Ensure workflow statuses use:
+  - stable internal IDs
+  - editable display labels
+- Prevent labels from mutating internal IDs
+- Normalize status handling across:
+  - Darbai
+  - Užduotys
+  - Užsakymai
+  - Periodiniai darbai
+  - future workflow modules
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped changes only
+- Preserve current Kanban behavior
+- Preserve SLA logic
+- Preserve analytics
+- Preserve filters
+- Preserve audit/history
+- Preserve recurring workflow logic
+- Preserve permissions
+
+Important:
+Use architecture:
+id: waiting_details
+label: Laukiama
+
+Do NOT use labels as internal IDs.
+
+Expected result:
+Reusable stable workflow status system across the platform.

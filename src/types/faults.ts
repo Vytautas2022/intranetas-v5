@@ -3,15 +3,14 @@ import { Fault as MockFault, FaultComment } from '../mock-db/faults';
 export type { FaultComment };
 
 export enum Status {
-  NEW = 'Naujas',
-  IN_PROGRESS = 'Vykdoma',
-  WAITING_DETAILS = 'Laukiama detalių',
-  FIXED = 'Sutvarkyta',
-  REJECTED = 'Atmesta',
-  SOMEDAY = 'Kada nors',
-  MOVED = 'PERKELTA'
+  NEW = 'new',
+  IN_PROGRESS = 'in_progress',
+  WAITING_DETAILS = 'waiting_details',
+  FIXED = 'fixed',
+  REJECTED = 'rejected',
+  SOMEDAY = 'someday',
+  MOVED = 'moved'
 }
-
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
 
 export type EntityType = 'fault' | 'task' | 'project' | 'sop';

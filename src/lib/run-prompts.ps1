@@ -1,4 +1,4 @@
-Get-ChildItem "./prompts/*.txt" | ForEach-Object {
+Get-ChildItem "./promptai/*.txt" | ForEach-Object {
 
     Write-Host "==================================="
     Write-Host "RUNNING PROMPT: $($_.Name)"
@@ -6,7 +6,7 @@ Get-ChildItem "./prompts/*.txt" | ForEach-Object {
 
     $prompt = Get-Content $_.FullName -Raw
 
-    codex exec $prompt
+   codex exec --full-auto "$prompt"
 
     Write-Host "BUILD CHECK..."
     npm run build

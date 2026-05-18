@@ -10,6 +10,8 @@ import {
 } from "date-fns";
 import { cn } from "../../lib/utils";
 import { Check, X, Circle, AlertCircle } from "lucide-react";
+import { Status } from "../../types/faults";
+import { normalizeWorkflowStatusId } from "../../logic/statusLabels";
 
 interface Props {
   faults?: any[];
@@ -164,7 +166,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
             (o: any) => o.week === w,
           );
           const newStatus =
-            f.status === "Sutvarkyta"
+            normalizeWorkflowStatusId(f.status) === Status.FIXED
               ? "completed"
               : f.status === "Atmesta"
                 ? "overdue"

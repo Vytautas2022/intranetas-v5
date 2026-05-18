@@ -1,0 +1,186 @@
+warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/auth/AuthProvider.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/auth/ProtectedRoute.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/AdminModule.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/components/sidebar/sidebarLogic.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/modules/moduleRegistry.ts', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/Promptai/10.txt b/Promptai/10.txt[m
+[1mdeleted file mode 100644[m
+[1mindex b57fe31..0000000[m
+[1m--- a/Promptai/10.txt[m
+[1m+++ /dev/null[m
+[36m@@ -1,43 +0,0 @@[m
+[31m-Perform full project self-diagnosis after all previous prompts.[m
+[31m-[m
+[31m-Requirements:[m
+[31m-[m
+[31m-1. Inspect entire project for:[m
+[31m-- TypeScript errors[m
+[31m-- build issues[m
+[31m-- runtime risks[m
+[31m-- broken imports[m
+[31m-- duplicated logic[m
+[31m-- invalid hooks usage[m
+[31m-- sidebar/render issues[m
+[31m-- modal issues[m
+[31m-- broken navigation[m
+[31m-- permission inconsistencies[m
+[31m-- unused states/components[m
+[31m-- architecture violations[m
+[31m-[m
+[31m-2. Verify:[m
+[31m-- existing modules still work[m
+[31m-- no existing workflow was broken[m
+[31m-- no duplicate providers/context/state introduced[m
+[31m-- no hardcoded mock data added outside existing architecture[m
+[31m-[m
+[31m-3. Preserve:[m
+[31m-- current architecture[m
+[31m-- existing modules[m
+[31m-- mock DB only approach[m
+[31m-[m
+[31m-4. Run:[m
+[31m-- npm run build[m
+[31m-- lint if available[m
+[31m-[m
+[31m-5. Auto-fix ONLY safe issues.[m
+[31m-[m
+[31m-6. Do NOT refactor entire project.[m
+[31m-[m
+[31m-7. At the end provide:[m
+[31m-- list of fixed issues[m
+[31m-- remaining risks[m
+[31m-- files changed[m
+[31m-[m
+[31m-8. Commit all fixes safely.[m
+\ No newline at end of file[m
+[1mdiff --git a/Promptai/3.txt b/Promptai/3.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/Promptai/4.txt b/Promptai/4.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/Promptai/5.txt b/Promptai/5.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/Promptai/6.txt b/Promptai/6.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/Promptai/7.txt b/Promptai/7.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/Promptai/8.txt b/Promptai/8.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/Promptai/9.txt b/Promptai/9.txt[m
+[1mdeleted file mode 100644[m
+[1mindex e69de29..0000000[m
+[1mdiff --git a/src/App.tsx b/src/App.tsx[m
+[1mindex 80251e2..19a18b5 100644[m
+[1m--- a/src/App.tsx[m
+[1m+++ b/src/App.tsx[m
+[36m@@ -200,7 +200,12 @@[m [mimport { ZmonesOrgModule } from "./modules/zmones-org/ZmonesOrgModule";[m
+ import {[m
+   getActiveModuleIdForPath,[m
+   getActiveTabIdForPath,[m
+[32m+[m[32m  getAdminInventorySubTabForRouteTab,[m
+[32m+[m[32m  getAdminTabIdForRouteTab,[m
+[32m+[m[32m  getAdminTabRoutePath,[m
+   getRouteSyncPath,[m
+[32m+[m[32m  getRouteTabIdForAdminTab,[m
+[32m+[m[32m  type AdminModuleTabId,[m
+ } from "./modules/moduleRegistry";[m
+ import { AppSidebar } from "./components/sidebar/AppSidebar";[m
+ import {[m
+[36m@@ -244,6 +249,11 @@[m [mimport { AuthProvider } from "./auth/AuthProvider";[m
+ import { LoginPage } from "./auth/LoginPage";[m
+ import { ProtectedRoute } from "./auth/ProtectedRoute";[m
+ import { useAuth } from "./auth/authContext";[m
+[32m+[m[32mimport {[m
+[32m+[m[32m  canAccessModule,[m
+[32m+[m[32m  canManageAllClubs,[m
+[32m+[m[32m  canManagePeriodicTasks,[m
+[32m+[m[32m} from "./logic/permissionEngine";[m
+ [m
+ const CLUBS = clubs;[m
+ const SUPPLIERS = MOCK_SUPPLIERS;[m
+[36m@@ -3569,6 +3579,19 @@[m [mfunction MainApp() {[m
+     return getActiveTabIdForPath(location.pathname);[m
+   }, [location.pathname]);[m
+ [m
+[32m+[m[32m  const getAdminModuleTab = (tabId: string) =>[m
+[32m+[m[32m    getAdminTabIdForRouteTab(tabId) || (tabId.replace("admin-", "") as any);[m
+[32m+[m
+[32m+[m[32m  const navigateToAdminTab = (tab: AdminModuleTabId) =>[m
+[32m+[m[32m    navigate(getAdminTabRoutePath(tab) || "/admin/vartotojai");[m
+[32m+[m
+[32m+[m[32m  const setAdminRouteTab = (tab: AdminModuleTabId) => {[m
+[32m+[m[32m    const routeTabId = getRouteTabIdForAdminTab(tab);[m
+[32m+[m[32m    if (routeTabId) {[m
+[32m+[m[32m      setActiveTab(routeTabId);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  };[m
+[32m+[m
+   const setActiveModule = (mod: string) => navigate("/" + mod);[m
+   const setActiveTab = (tab: string) => navigate("/" + tab);[m
+ [m
+[36m@@ -3818,7 +3841,7 @@[m [mfunction MainApp() {[m
+   const [isSopModalOpen, setIsSopModalOpen] = useState(false);[m
+   const [searchQuery, setSearchQuery] = useState("");[m
+   const [selectedRegion, setSelectedRegion] = useState([m
+[31m-    ["SUPER_ADMIN", "ADMIN", "OPS"].includes(currentUser.role)[m
+[32m+[m[32m    canManageAllClubs(currentUser)[m
+       ? "ALL"[m
+       : currentUser.region,[m
+   );[m
+[36m@@ -6172,7 +6195,7 @@[m [m${task.updatedBy}[m
+         {/* Content Area */}[m
+         <main className="flex-1 overflow-y-auto bg-white pb-24 lg:pb-8 relative">[m
+           {activeModule === "ceo" ? ([m
+[31m-            !["OPS", "ADMIN", "SUPER_ADMIN"].includes(currentUser.role) ? ([m
+[32m+[m[32m            !canAccessModule(currentUser, "ceo") ? ([m
+               <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>[m
+             ) : ([m
+             <CeoDashboard[m
+[36m@@ -6199,22 +6222,26 @@[m [m${task.updatedBy}[m
+             />[m
+             )[m
+           ) : activeModule === "ops-flow" ? ([m
+[31m-            <OpsFlowView[m
+[31m-              tasks={faults}[m
+[31m-              onNavigateTo={(status, type) => {[m
+[31m-                setActiveModule("darbai");[m
+[31m-                setActiveTab("kanban" as any);[m
+[31m-                setTypeFilters([[m
+[31m-                  type === "gedimai"[m
+[31m-                    ? "FACILITY_FAULT"[m
+[31m-                    : type === "uzsakymai"[m
+[31m-                      ? "ORDER"[m
+[31m-                      : "OTHER",[m
+[31m-                ]); // Simplified mapping[m
+[31m-              }}[m
+[31m-            />[m
+[32m+[m[32m            !canAccessModule(currentUser, "ops-flow") ? ([m
+[32m+[m[32m              <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>[m
+[32m+[m[32m            ) : ([m
+[32m+[m[32m              <OpsFlowView[m
+[32m+[m[32m                tasks={faults}[m
+[32m+[m[32m                onNavigateTo={(status, type) => {[m
+[32m+[m[32m                  setActiveModule("darbai");[m
+[32m+[m[32m                  setActiveTab("kanban" as any);[m
+[32m+[m[32m                  setTypeFilters([[m
+[32m+[m[32m                    type === "gedimai"[m
+[32m+[m[32m                      ? "FACILITY_FAULT"[m
+[32m+[m[32m                      : type === "uzsakymai"[m
+[32m+[m[32m                        ? "ORDER"[m
+[32m+[m[32m                        : "OTHER",[m
+[32m+[m[32m                  ]); // Simplified mapping[m
+[32m+[m[32m                }}[m
+[32m+[m[32m              />[m
+[32m+[m[32m            )[m
+           ) : activeModule === "admin" ? ([m
+[31m-            !["SUPER_ADMIN", "ADMIN", "OPS"].includes(currentUser.role) ? ([m
+[32m+[m[32m            !canAccessModule(currentUser, "admin") ? ([m
+               <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>[m
+             ) : ([m
+             <Admi

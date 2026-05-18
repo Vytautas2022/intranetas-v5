@@ -1,0 +1,30 @@
+Centralize route protection using the reusable permission engine.
+
+Goal:
+Ensure routes, modules, and sidebar use the same permission logic.
+
+Tasks:
+- Upgrade route protection to support:
+  - authentication
+  - module permissions
+  - submodule permissions
+  - SUPER_ADMIN behavior
+- Preserve existing routes
+- Preserve existing navigation
+- Preserve current module rendering
+
+Requirements:
+- Mock DB only
+- No backend
+- No rewrites
+- Minimal scoped changes only
+- Preserve current routing structure
+- Preserve current UI/UX
+- Preserve sidebar behavior
+- Preserve mobile behavior
+
+Important:
+Do NOT hardcode route access rules.
+
+Expected result:
+Route access becomes permission-aware and fully aligned with sidebar/module visibility.
