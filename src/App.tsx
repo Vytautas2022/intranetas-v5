@@ -94,7 +94,6 @@ import * as XLSX from "xlsx";
 import { clubs, Club } from "./mock-db/clubs";
 import { regionManagers } from "./mock-db/regionManagers";
 import { assignManager, findCoordinatorForClub } from "./logic/assignmentLogic";
-import { filterFaults } from "./logic/faultFilter";
 import {
   faults as MOCK_FAULTS,
   Fault as MockFault,
@@ -107,7 +106,12 @@ import { addComment, editComment, deleteComment } from "./logic/commentLogic";
 import { updateFaultSOP } from "./logic/sopLogic";
 import { setWatchMode, unwatchFault } from "./logic/watchLogic";
 import { createAuditLogEntry } from "./logic/auditLogic";
+import { createAppAuditEntry } from "./logic/auditEngine";
 import { generateId, generateUniqueId } from "./logic/idLogic";
+import {
+  hydrateMockCollection,
+  writeMockStorage,
+} from "./logic/mockDbHydration";
 import { addMedia, MEDIA_LIMITS } from "./logic/mediaLogic";
 import { compressAndResizeImage } from "./logic/imageProcessing";
 import {
@@ -127,17 +131,21 @@ import {
   markAsRead,
 } from "./logic/notificationLogic";
 import { getRemainingTime, checkSLA, getSLAHeat } from "./logic/slaLogic";
+import { getSlaDeadline } from "./logic/slaEngine";
 import { rejectFault, validateStatusChange } from "./logic/statusLogic";
 import {
   formatWorkflowStatusLabel,
   normalizeWorkflowStatusId,
 } from "./logic/statusLabels";
+import {
+  isRegisteredWorkflowStatus,
+  UNKNOWN_STATUS_LANE_ID,
+} from "./logic/workflowStatusRegistry";
 import { getSOP } from "./logic/sopLogic";
 import { users } from "./mock-db/users";
 import type { User } from "./mock-db/users";
 import { initialCities } from "./mock-db/cities";
 import type { City } from "./mock-db/cities";
-import { getScopedFaults } from "./logic/regionScopeLogic";
 import { surveys as initialSurveys } from "./mock-db/surveys";
 import { filterFaultTypes } from "./logic/faultSearchLogic";
 import { moveFault, createFaultHistory } from "./logic/kanbanLogic";
@@ -193,6 +201,16 @@ import {
   getWorkflowTypeById,
   WorkflowType,
 } from "./mock-db/workflowTypes";
+import {
+  applyWorkflowMigration,
+  filterBoardEntities,
+  getActiveDarbaiWorkflowIds,
+  getBoardKanbanLanes,
+  getScopedEntities,
+  hasUnmappedWorkflowStatuses,
+  normalizeWorkflowStatusConfig,
+  splitScopedEntities,
+} from "./logic/appWorkflowHelpers";
 
 import { OrderProvider } from "./modules/orders/OrderContext";
 import { OrderModule } from "./modules/orders/OrderModule";
@@ -3652,54 +3670,40 @@ function MainApp() {
     return () => window.removeEventListener("popstate", checkRoute);
   }, []);
 
-  const applyWorkflowMigration = (items: Fault[]): Fault[] =>
-    items.map((item) => ({
-      ...item,
-      status: normalizeWorkflowStatusId(item.status) as any,
-      history: (item.history || []).map((historyItem: any) => ({
-        ...historyItem,
-        oldStatus: historyItem.oldStatus
-          ? normalizeWorkflowStatusId(historyItem.oldStatus)
-          : historyItem.oldStatus,
-        newStatus: historyItem.newStatus
-          ? normalizeWorkflowStatusId(historyItem.newStatus)
-          : historyItem.newStatus,
-      })),
-      status_history: (item.status_history || []).map((historyItem: any) => ({
-        ...historyItem,
-        from: historyItem.from
-          ? normalizeWorkflowStatusId(historyItem.from)
-          : historyItem.from,
-        to: historyItem.to
-          ? normalizeWorkflowStatusId(historyItem.to)
-          : historyItem.to,
-      })),
-      workflowTypeId:
-        item.workflowTypeId ||
-        getWorkflowTypeByLegacyCategory(item.category || item.type)?.id ||
-        getWorkflowTypeByLegacyCategory("OTHER")?.id,
-    }));
-
   const [workflowTypes, setWorkflowTypes] =
     useState<WorkflowType[]>(initialWorkflowTypes);
 
+  const updateWorkflowTypes = (
+    updater: React.SetStateAction<WorkflowType[]>,
+  ) => {
+    setWorkflowTypes((previous) => {
+      const next =
+        typeof updater === "function" ? updater(previous) : updater;
+      return normalizeWorkflowStatusConfig(next, previous);
+    });
+  };
+
   const [faults, setFaults] = useState<Fault[]>(() => {
-    const saved = localStorage.getItem("app_faults");
-    return applyWorkflowMigration(saved ? JSON.parse(saved) : INITIAL_FAULTS);
+    return applyWorkflowMigration(
+      hydrateMockCollection("app_faults", INITIAL_FAULTS),
+      getWorkflowTypeByLegacyCategory,
+    );
   });
 
   useEffect(() => {
-    localStorage.setItem("app_faults", JSON.stringify(faults));
+    writeMockStorage("app_faults", faults);
   }, [faults]);
 
   const [appSurveys, setAppSurveys] = useState(initialSurveys);
   const [tasks, setTasks] = useState<Fault[]>(() => {
-    const saved = localStorage.getItem("app_tasks");
-    return applyWorkflowMigration(saved ? JSON.parse(saved) : (mockTasks as any));
+    return applyWorkflowMigration(
+      hydrateMockCollection("app_tasks", mockTasks as any),
+      getWorkflowTypeByLegacyCategory,
+    );
   });
 
   useEffect(() => {
-    localStorage.setItem("app_tasks", JSON.stringify(tasks));
+    writeMockStorage("app_tasks", tasks);
   }, [tasks]);
   const [orders, setOrders] = useState(MOCK_ORDERS);
   const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS);
@@ -3709,12 +3713,14 @@ function MainApp() {
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [appClubs, setAppClubs] = useState<Club[]>(clubs);
   const [appUsers, setAppUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem("app_users");
-    return saved ? JSON.parse(saved) : users;
+    return hydrateMockCollection("app_users", users, {
+      mergeSeed: true,
+      getKey: (user) => user.email?.trim().toLowerCase() || user.id,
+    });
   });
 
   useEffect(() => {
-    localStorage.setItem("app_users", JSON.stringify(appUsers));
+    writeMockStorage("app_users", appUsers);
   }, [appUsers]);
   const [appCities, setAppCities] = useState<City[]>(initialCities);
   const [appFacilityTemplates, setAppFacilityTemplates] =
@@ -4362,17 +4368,15 @@ function MainApp() {
     previousState?: string,
     metadata?: any,
   ) => {
-    const entry: AuditEntry = {
-      id: generateUniqueId("a"),
+    const entry: AuditEntry = createAppAuditEntry({
       faultId,
-      timestamp: Date.now(),
       user: currentUser.name,
       action,
       description,
       changes,
       previousState,
       metadata,
-    };
+    });
     setAuditTrail((prev) => [entry, ...prev]);
   };
 
@@ -5554,7 +5558,7 @@ ${task.updatedBy}
         {
           status: { from: f.status, to: Status.WAITING_DETAILS },
           slaDeadline: {
-            from: f.slaDeadline || f.createdAt + f.slaHours * 3600000,
+            from: getSlaDeadline(f),
             to: new Date(data.dueDate).getTime(),
           },
         },
@@ -5803,125 +5807,68 @@ ${task.updatedBy}
 
   // --- Data Scoping & Filtering ---
 
-  const scopedEntities = useMemo(() => {
-    // Combine and deduplicate by ID to prevent duplicate key errors
-    const entityMap = new Map<string, Fault>();
-    faults.forEach((f) => {
-      if (f && f.id) entityMap.set(f.id, f);
-    });
-    tasks.forEach((t) => {
-      if (t && t.id) entityMap.set(t.id, t);
-    });
-    const combined = Array.from(entityMap.values());
-
-    return getScopedFaults(combined, currentUser, selectedRegion);
-  }, [faults, tasks, currentUser, selectedRegion]);
-
-  const scopedFaults = useMemo(
-    () => scopedEntities.filter((e) => e.entityType === "fault"),
-    [scopedEntities],
+  const scopedEntities = useMemo(
+    () => getScopedEntities(faults, tasks, currentUser, selectedRegion),
+    [faults, tasks, currentUser, selectedRegion],
   );
-  const scopedTasks = useMemo(
-    () => scopedEntities.filter((e) => e.entityType !== "fault"),
+
+  const { scopedFaults, scopedTasks } = useMemo(
+    () => splitScopedEntities(scopedEntities),
     [scopedEntities],
   );
 
-  const filteredEntities = useMemo(() => {
-    let base = scopedEntities.filter((item) => {
-      if (item.isDeleted) return false;
-      if (activeTab === "kanban") return item.entityType === "fault";
-      if (activeTab === "tasks") return item.entityType !== "fault";
-      return false;
-    });
+  const filteredEntities = useMemo(
+    () =>
+      filterBoardEntities({
+        scopedEntities,
+        activeTab,
+        searchQuery,
+        clubs: CLUBS,
+        getRemainingTime,
+        slaFilter,
+        typeFilters,
+        sourceFilter,
+        appUsers,
+        currentUser,
+        assigneeFilter,
+        quickFilter,
+        periodicFilter,
+        clubFilter,
+      }),
+    [
+      scopedEntities,
+      activeTab,
+      searchQuery,
+      slaFilter,
+      typeFilters,
+      sourceFilter,
+      appUsers,
+      currentUser,
+      assigneeFilter,
+      quickFilter,
+      periodicFilter,
+      clubFilter,
+    ],
+  );
 
-    let filtered = base.filter((f) => {
-      const matchesSearch =
-        f.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        CLUBS.find((c) => c.id === f.clubId)
-          ?.name.toLowerCase()
-          .includes(searchQuery.toLowerCase());
-
-      const sla = getRemainingTime(f);
-      const isDelayed = sla.overdue;
-      const matchesSla =
-        slaFilter === "visi" ||
-        (slaFilter === "delayed" && isDelayed) ||
-        (slaFilter === "<24h" && !isDelayed && sla.text.includes("h"));
-
-      const isNear =
-        !isDelayed && sla.text.includes("h") && parseInt(sla.text) < 24;
-
-      const matchesType =
-        typeFilters.length === 0
-          ? true
-          : typeFilters.some(
-              (filter) =>
-                filter === f.type ||
-                filter === f.category ||
-                filter === f.workflowTypeId,
-            );
-      const source = f.source || "USER";
-      const matchesSource = sourceFilter === "ALL" || source === sourceFilter;
-
-      const assignedToId = f.assigned_to || f.assigneeId;
-      const assignedToName =
-        typeof f.assignedTo === "object" && f.assignedTo
-          ? f.assignedTo.name
-          : f.assignedTo ||
-            f.assigneeName ||
-            (f.assigned_to
-              ? appUsers.find((u) => u.id === f.assigned_to)?.name
-              : null);
-
-      const matchesAssignee =
-        assigneeFilter === "ALL" ||
-        (assigneeFilter === "MINE" &&
-          (assignedToId === currentUser.id ||
-            assignedToName === currentUser.name)) ||
-        (assigneeFilter === "OPS" &&
-          (assignedToName === "OPS" || assignedToId === "OPS")) ||
-        assignedToId === assigneeFilter ||
-        assignedToName === assigneeFilter;
-
-      const mineQuickMatch =
-        assignedToId === currentUser.id || assignedToName === currentUser.name;
-
-      const matchesQuick =
-        quickFilter === "all" ||
-        (quickFilter === "mine" && mineQuickMatch) ||
-        (quickFilter === "delayed" && isDelayed) ||
-        (quickFilter === "near" && isNear) ||
-        (quickFilter === "priority" && f.priority === "critical");
-
-      const matchesPeriodic =
-        periodicFilter === "ALL" ||
-        (periodicFilter === "PERIODIC" && f.source === "PERIODIC") ||
-        (periodicFilter === "SIMPLE" && f.source !== "PERIODIC");
-
-      return (
-        matchesSearch &&
-        matchesSla &&
-        matchesQuick &&
-        matchesType &&
-        matchesSource &&
-        matchesAssignee &&
-        matchesPeriodic
-      );
-    });
-
-    return filterFaults(filtered, "all", clubFilter);
-  }, [
-    scopedEntities,
-    searchQuery,
-    clubFilter,
-    slaFilter,
-    quickFilter,
-    typeFilters,
-    sourceFilter,
-    currentUser,
-    activeTab,
-    periodicFilter,
-  ]);
+  const canViewSomedayLane = canManagePeriodicTasks(currentUser);
+  const activeWorkflowIds = useMemo(
+    () => getActiveDarbaiWorkflowIds(workflowTypes, typeFilters),
+    [workflowTypes, typeFilters],
+  );
+  const hasUnmappedStatuses = useMemo(
+    () => hasUnmappedWorkflowStatuses(filteredEntities),
+    [filteredEntities],
+  );
+  const kanbanLanes = useMemo(
+    () =>
+      getBoardKanbanLanes(workflowTypes, {
+        includeSomeday: canViewSomedayLane,
+        activeWorkflowIds,
+        includeUnknownLane: hasUnmappedStatuses,
+      }),
+    [workflowTypes, canViewSomedayLane, activeWorkflowIds, hasUnmappedStatuses],
+  );
 
   const analyticsData = useMemo<AnalyticsData>(() => {
     return calculateAnalytics(
@@ -5949,6 +5896,15 @@ ${task.updatedBy}
     }
 
     const newStatus = destination.droppableId as Status;
+    if (
+      destination.droppableId === UNKNOWN_STATUS_LANE_ID ||
+      !isRegisteredWorkflowStatus(normalizeWorkflowStatusId(destination.droppableId))
+    ) {
+      console.warn(
+        `[workflow-status] Blocked move to unsupported status "${destination.droppableId}"`,
+      );
+      return;
+    }
 
     // special case for closing fixed faults through closure modal if needed
     if (newStatus === Status.FIXED) {
@@ -6299,7 +6255,7 @@ ${task.updatedBy}
               setClubTaskConfigs={setClubTaskConfigs}
               tasks={faults}
               workflowTypes={workflowTypes}
-              setWorkflowTypes={setWorkflowTypes}
+              setWorkflowTypes={updateWorkflowTypes}
               renderPeriodicModule={() => <PeriodicAdminModule />}
               onTabChange={navigateToAdminTab}
               activeTab={getAdminModuleTab(activeTab)}
@@ -6585,21 +6541,22 @@ ${task.updatedBy}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: 20 }}
-                            className={canManagePeriodicTasks(currentUser) ? "grid grid-cols-6 gap-4 items-start h-full" : "grid grid-cols-5 gap-4 items-start h-full"}
+                            className="grid gap-4 items-start h-full"
+                            style={{
+                              gridTemplateColumns: `repeat(${kanbanLanes.length}, minmax(0, 1fr))`,
+                            }}
                           >
-                            {[
-                              Status.NEW,
-                              Status.IN_PROGRESS,
-                              Status.WAITING_DETAILS,
-                              Status.FIXED,
-                              Status.REJECTED,
-                              ...(canManagePeriodicTasks(currentUser)
-                                ? [Status.SOMEDAY]
-                                : []),
-                            ].map((status) => {
+                            {kanbanLanes.map((status) => {
                               const columnFaults = (
                                 filteredEntities || []
-                              ).filter((f) => f.status === status);
+                              ).filter((f) =>
+                                status === UNKNOWN_STATUS_LANE_ID
+                                  ? !isRegisteredWorkflowStatus(
+                                      normalizeWorkflowStatusId(f.status),
+                                    )
+                                  : normalizeWorkflowStatusId(f.status) ===
+                                    status,
+                              );
                               const clubMap = new Map(
                                 (appClubs || []).map((c) => [c.id, c]),
                               );
@@ -6607,7 +6564,11 @@ ${task.updatedBy}
                                 <KanbanColumn
                                   key={`col-${status}`}
                                   id={status}
-                                  title={formatWorkflowStatusLabel(status)}
+                                  title={
+                                    status === UNKNOWN_STATUS_LANE_ID
+                                      ? "Nepriskirta"
+                                      : formatWorkflowStatusLabel(status)
+                                  }
                                   count={columnFaults.length}
                                   currentUserRole={currentUser.role}
                                   columnFaults={columnFaults}
@@ -6789,7 +6750,7 @@ ${task.updatedBy}
                           setClubTaskConfigs={setClubTaskConfigs}
                           tasks={faults}
                           workflowTypes={workflowTypes}
-                          setWorkflowTypes={setWorkflowTypes}
+                          setWorkflowTypes={updateWorkflowTypes}
                           renderPeriodicModule={() => <PeriodicAdminModule />}
                           activeTab={getAdminModuleTab(activeTab)}
                           inventorySubTab={getAdminInventorySubTabForRouteTab(

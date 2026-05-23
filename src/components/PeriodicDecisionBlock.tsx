@@ -3,7 +3,7 @@ import { FileText, AlertTriangle, Calendar, CheckCircle2, Clock, RotateCcw as Hi
 import { RichTextEditor } from './ui/RichTextEditor';
 import DOMPurify from 'dompurify';
 import { cn } from '../lib/utils';
-import { Fault } from '../types/faults';
+import { Fault, Status } from '../types/faults';
 import { mockPeriodicTemplates } from '../mock-db/periodicTemplates';
 
 import { createAuditLogEntry } from '../logic/auditLogic';
@@ -30,7 +30,7 @@ export const PeriodicDecisionBlock: React.FC<{
     });
 
     if (decision === 'EXECUTE') {
-      onUpdate({ status: 'Vykdoma' as any });
+      onUpdate({ status: Status.IN_PROGRESS as any });
     }
   };
 

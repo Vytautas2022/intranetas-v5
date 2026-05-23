@@ -18,7 +18,8 @@ export function convertTaskToTaskModule(
     id: newTaskId,
     source_task_id: sourceTask.id,
     entityType: mode === 'PROJECT' ? 'project' : 'task',
-    status: mode === 'PROJECT' ? 'Planuojama' : Status.SOMEDAY,
+    status: mode === 'PROJECT' ? Status.NEW : Status.SOMEDAY,
+    phase: mode === 'PROJECT' ? 'Planuojama' : sourceTask.phase,
     type: mode === 'PROJECT' ? 'PROJECT' : 'SOMEDAY',
     createdAt: now,
     updatedAt: now,
@@ -26,7 +27,7 @@ export function convertTaskToTaskModule(
     updated_at: new Date(now).toISOString(),
     status_history: [{
       from: sourceTask.status || null,
-      to: mode === 'PROJECT' ? 'Planuojama' : Status.SOMEDAY,
+      to: mode === 'PROJECT' ? Status.NEW : Status.SOMEDAY,
       date: new Date(now).toISOString(),
       user: currentUser.name
     }],

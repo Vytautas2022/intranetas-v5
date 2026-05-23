@@ -42,6 +42,7 @@ import { cn } from '../../lib/utils';
 import { Status } from '../../types/faults';
 import { generateOccurrences } from '../periodic/utils/occurrenceHelper';
 import { format, subDays, startOfDay, endOfDay, isWithinInterval, parseISO } from 'date-fns';
+import { getSlaDeadline } from '../../logic/slaEngine';
 
 const KpiCard = ({ metric, onClick }: { metric: KpiMetric, onClick?: () => void }) => {
   const colorClasses: Record<string, string> = {
@@ -156,7 +157,7 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
     // --- 2. SLA PERFORMANCE ---
     const closedThisMonth = (faults || []).filter(f => f && f.status === Status.FIXED && f.closedAt && f.closedAt >= last30d);
     const onTimeThisMonth = closedThisMonth.filter(f => {
-      const deadline = f.slaDeadline || (f.createdAt + f.slaHours * 3600000);
+      const deadline = getSlaDeadline(f);
       return f.closedAt! <= deadline;
     }).length;
     
@@ -164,7 +165,7 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
     
     const openFaults = (faults || []).filter(f => f && f.status !== Status.FIXED && f.status !== Status.REJECTED);
     const overdueCount = openFaults.filter(f => {
-      const deadline = f.slaDeadline || (f.createdAt + f.slaHours * 3600000);
+      const deadline = getSlaDeadline(f);
       return now > deadline;
     }).length;
     const overduePercentage = openFaults.length > 0 ? Math.round((overdueCount / openFaults.length) * 100) : 0;
@@ -217,7 +218,7 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
       
       const regionFaults = (faults || []).filter(f => f && clubIds.includes(f.clubId) && f.createdAt >= last30d).length;
       const regionSla = (faults || []).filter(f => f && clubIds.includes(f.clubId) && f.status === Status.FIXED && f.closedAt && f.closedAt >= last30d);
-      const regionOnTime = regionSla.filter(f => (f.closedAt! <= (f.slaDeadline || (f.createdAt + f.slaHours * 3600000)))).length;
+      const regionOnTime = regionSla.filter(f => (f.closedAt! <= getSlaDeadline(f))).length;
       
       const regionSurveys = (surveys || []).filter(s => s && clubIds.includes(s.clubId) && s.timestamp >= last90d);
       

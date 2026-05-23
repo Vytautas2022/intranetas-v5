@@ -1,5 +1,6 @@
 import { Fault, AnalyticsData, AuditEntry, RecurringTask, Status } from '../types/faults';
 import { SLAResult } from './slaLogic';
+import { getSlaDeadline } from './slaEngine';
 
 export const calculateAnalytics = (
   allFaults: Fault[],
@@ -48,7 +49,7 @@ export const calculateAnalytics = (
       closedCount++;
       totalResolutionTime += (f.closedAt - f.createdAt);
       
-      const slaDeadline = f.slaDeadline || (f.createdAt + f.slaHours * 3600000);
+      const slaDeadline = getSlaDeadline(f);
       if (f.closedAt <= slaDeadline) {
         closedOnTimeCount++;
       }
@@ -152,7 +153,7 @@ export const calculateAnalytics = (
     
     if (f.status === Status.FIXED && f.closedAt) {
       periodDataMap[m].closed++;
-      const slaDeadline = f.slaDeadline || (f.createdAt + f.slaHours * 3600000);
+      const slaDeadline = getSlaDeadline(f);
       if (f.closedAt <= slaDeadline) periodDataMap[m].closedOnTime++;
     }
   });

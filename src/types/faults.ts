@@ -187,6 +187,6 @@ export interface RecurringTask {
   typeId: string;
   createdAt: number;
   deadline: number;
-  status: "Naujas" | "Vykdoma" | "Atlikta";
+  status: Status.NEW | Status.IN_PROGRESS | Status.FIXED;
   assignee: string;
 }

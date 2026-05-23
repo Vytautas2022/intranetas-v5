@@ -168,7 +168,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
           const newStatus =
             normalizeWorkflowStatusId(f.status) === Status.FIXED
               ? "completed"
-              : f.status === "Atmesta"
+              : normalizeWorkflowStatusId(f.status) === Status.REJECTED
                 ? "overdue"
                 : "scheduled";
 

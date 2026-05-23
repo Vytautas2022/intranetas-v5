@@ -8,6 +8,7 @@ import {
   getDefaultModulePermissions,
   normalizePermissionRole,
 } from "../logic/permissionEngine";
+import { readMockStorage, writeMockStorage } from "../logic/mockDbHydration";
 
 const AUTH_STORAGE_KEY = "sg_auth_user_id";
 const SYSTEM_USERS_STORAGE_KEY = "app_users";
@@ -95,10 +96,8 @@ const getSavedUserById = (storedId: string): SystemUserRecord | null => {
   if (typeof window === "undefined") return null;
 
   try {
-    const savedUsers = localStorage.getItem(SYSTEM_USERS_STORAGE_KEY);
-    const parsedUsers = savedUsers
-      ? (JSON.parse(savedUsers) as SystemUserRecord[])
-      : [];
+    const parsedUsers =
+      readMockStorage<SystemUserRecord[]>(SYSTEM_USERS_STORAGE_KEY) || [];
     return parsedUsers.find((user) => user.id === storedId) || null;
   } catch (error) {
     console.debug("[auth] Failed to inspect saved users by id:", error);
@@ -112,10 +111,8 @@ const getSystemUsers = (): SystemUserRecord[] => {
   }
 
   try {
-    const savedUsers = localStorage.getItem(SYSTEM_USERS_STORAGE_KEY);
-    const parsedUsers = savedUsers
-      ? (JSON.parse(savedUsers) as SystemUserRecord[])
-      : [];
+    const parsedUsers =
+      readMockStorage<SystemUserRecord[]>(SYSTEM_USERS_STORAGE_KEY) || [];
     const users = mergeUsers(systemUsers, parsedUsers).map((user) =>
       ensureModulePermissionsConfig(user),
     );
@@ -127,7 +124,7 @@ const getSystemUsers = (): SystemUserRecord[] => {
       return Boolean(savedUser && !getConfiguredModulePermissions(savedUser));
     });
     if (hasMissingSavedConfig) {
-      localStorage.setItem(SYSTEM_USERS_STORAGE_KEY, JSON.stringify(repairedSavedUsers));
+      writeMockStorage(SYSTEM_USERS_STORAGE_KEY, repairedSavedUsers);
     }
     console.debug(
       "[auth] Internal users list emails:",
@@ -154,10 +151,8 @@ const saveAutoApprovedGoogleUser = (
   if (typeof window === "undefined") return null;
 
   try {
-    const savedUsers = localStorage.getItem(SYSTEM_USERS_STORAGE_KEY);
-    const parsedUsers = savedUsers
-      ? (JSON.parse(savedUsers) as SystemUserRecord[])
-      : [];
+    const parsedUsers =
+      readMockStorage<SystemUserRecord[]>(SYSTEM_USERS_STORAGE_KEY) || [];
     const existingUser = mergeUsers(systemUsers, parsedUsers).find(
       (user) => normalizeEmail(user.email) === normalizedEmail,
     );
@@ -188,7 +183,7 @@ const saveAutoApprovedGoogleUser = (
       nextUsers.push(approvedUserWithPermissions);
     }
 
-    localStorage.setItem(SYSTEM_USERS_STORAGE_KEY, JSON.stringify(nextUsers));
+    writeMockStorage(SYSTEM_USERS_STORAGE_KEY, nextUsers);
     console.debug("[auth] Auto-approved Google user saved:", {
       id: approvedUserWithPermissions.id,
       email: approvedUserWithPermissions.email,

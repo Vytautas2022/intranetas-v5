@@ -1,5 +1,6 @@
 import { AuditLogEntry, ActionType, auditLogs } from '../mock-db/auditLogs';
 import { currentUser } from '../mock-db/currentUser';
+import { createGlobalAuditEntry } from './auditEngine';
 
 export const createAuditLogEntry = (params: {
   moduleId: string;
@@ -17,15 +18,10 @@ export const createAuditLogEntry = (params: {
   snapshotBefore?: any;
   snapshotAfter?: any;
 }) => {
-  const newEntry: AuditLogEntry = {
-    id: Math.random().toString(36).substring(2, 9),
+  const newEntry: AuditLogEntry = createGlobalAuditEntry({
     ...params,
-    userId: currentUser.id,
-    userName: currentUser.name,
-    userRole: currentUser.role,
-    timestamp: new Date().toISOString(),
-    canRestore: params.canRestore ?? false,
-  };
+    actor: currentUser,
+  });
 
   auditLogs.unshift(newEntry);
   return newEntry;

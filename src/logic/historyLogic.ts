@@ -1,4 +1,5 @@
 import { HistoryItem } from '../types/common';
+import { createHistoryEvent } from './auditEngine';
 
 interface EntityWithHistory {
   history?: any[];
@@ -15,17 +16,7 @@ export const createHistoryItem = (params: {
   to?: string | null;
   user: string;
   meta?: Record<string, unknown>;
-}): HistoryItem => {
-  return {
-    id: Math.random().toString(36).substring(2, 9),
-    type: params.type,
-    from: params.from,
-    to: params.to,
-    date: Date.now(),
-    user: params.user,
-    meta: params.meta,
-  };
-};
+}): HistoryItem => createHistoryEvent(params);
 
 /**
  * Adds a history item to the entity, respecting existing structures.

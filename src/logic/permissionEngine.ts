@@ -1,6 +1,10 @@
 import type { AuthUser, ModulePermission } from "../auth/types";
 import type { UserRole } from "../types/roles";
-import { moduleRegistry, routeRegistry } from "../modules/moduleRegistry";
+import {
+  moduleRegistry,
+  routeRegistry,
+  type RouteRegistryItem,
+} from "../modules/moduleRegistry";
 
 type PermissionKey = ModulePermission | string;
 
@@ -93,19 +97,32 @@ export const canAccessModule = (
   moduleId?: string,
 ): boolean => canAccessPermission(user, getModulePermissionKey(moduleId));
 
-export const canAccessRoute = (
-  user: PermissionSubject,
-  pathname: string,
-): boolean => {
+const getRouteMatch = (pathname: string): RouteRegistryItem | undefined => {
   const path = pathname.toLowerCase().replace(/\/+$/, "") || "/";
-  const match = routeRegistry
+  return routeRegistry
     .filter((route) => {
       const routePath = route.path.toLowerCase().replace(/\/+$/, "") || "/";
       return path === routePath || path.startsWith(`${routePath}/`);
     })
     .sort((a, b) => b.path.length - a.path.length)[0];
+};
 
-  return match ? canAccessPermission(user, match.permissionKey) : true;
+export const canAccessSubmodule = (
+  user: PermissionSubject,
+  permissionKey?: PermissionKey,
+): boolean => canAccessPermission(user, permissionKey);
+
+export const canAccessRoute = (
+  user: PermissionSubject,
+  pathname: string,
+): boolean => {
+  const match = getRouteMatch(pathname);
+  if (!match) return true;
+
+  const routeModuleAllowed = canAccessModule(user, match.moduleId);
+  const routePermissionAllowed = canAccessSubmodule(user, match.permissionKey);
+
+  return routeModuleAllowed && routePermissionAllowed;
 };
 
 export const canSeeSidebarModule = (
@@ -123,7 +140,7 @@ export const canSeeSubmodule = (
   permissionKey?: PermissionKey,
   allowedRoles?: UserRole | UserRole[],
 ): boolean => {
-  if (!canAccessPermission(user, permissionKey)) return false;
+  if (!canAccessSubmodule(user, permissionKey)) return false;
   if (!allowedRoles) return true;
 
   const role = normalizePermissionRole(user?.role);

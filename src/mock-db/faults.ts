@@ -132,7 +132,7 @@ export const faults: Fault[] = [
     description: 'Klientė bandė įjungti, bet jokia reakcija.',
     clubId: 'akropolis',
     clubName: 'Akropolis',
-    status: 'Naujas',
+    status: 'new',
     type: 'soliariumas',
     entityType: 'fault',
     createdAt: Date.now() - 3600000 * 48,
@@ -140,7 +140,7 @@ export const faults: Fault[] = [
     created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
     updated_at: new Date(Date.now() - 3600000 * 2).toISOString(),
     status_history: [
-      { from: null, to: 'Naujas', date: new Date(Date.now() - 3600000 * 48).toISOString(), user: 'Admin' }
+      { from: null, to: 'new', date: new Date(Date.now() - 3600000 * 48).toISOString(), user: 'Admin' }
     ],
     assigneeId: 'm1',
     assigneeName: 'Jonas Jonaitis',
@@ -176,7 +176,7 @@ export const faults: Fault[] = [
     description: 'Didelis veidrodis atsilaisvino ir nukrito.',
     clubId: 'panorama',
     clubName: 'Panorama',
-    status: 'Sutvarkyta',
+    status: 'fixed',
     type: 'baldai',
     entityType: 'fault',
     createdAt: Date.now() - 3600000 * 72,
@@ -184,8 +184,8 @@ export const faults: Fault[] = [
     created_at: new Date(Date.now() - 3600000 * 72).toISOString(),
     updated_at: new Date(Date.now() - 3600000 * 12).toISOString(),
     status_history: [
-      { from: null, to: 'Naujas', date: new Date(Date.now() - 3600000 * 72).toISOString(), user: 'Admin' },
-      { from: 'Vykdoma', to: 'Sutvarkyta', date: new Date(Date.now() - 3600000 * 12).toISOString(), user: 'Jonas' }
+      { from: null, to: 'new', date: new Date(Date.now() - 3600000 * 72).toISOString(), user: 'Admin' },
+      { from: 'in_progress', to: 'fixed', date: new Date(Date.now() - 3600000 * 12).toISOString(), user: 'Jonas' }
     ],
     closedAt: Date.now() - 3600000 * 12,
     assigneeId: 'm1',
@@ -224,8 +224,8 @@ export const faults: Fault[] = [
         timestamp: Date.now() - 3600000 * 12,
         user: 'Jonas',
         actionType: 'STATUS_CHANGE',
-        oldStatus: 'Vykdoma',
-        newStatus: 'Sutvarkyta'
+        oldStatus: 'in_progress',
+        newStatus: 'fixed'
       }
     ]
   },
@@ -235,7 +235,7 @@ export const faults: Fault[] = [
     description: 'Juosta slysta bėgant didesniu greičiu.',
     clubId: 'oas',
     clubName: 'Ozas',
-    status: 'Laukiama detalių',
+    status: 'waiting_details',
     type: 'treniruokliai',
     entityType: 'fault',
     createdAt: Date.now() - 3600000 * 120,
@@ -243,8 +243,8 @@ export const faults: Fault[] = [
     created_at: new Date(Date.now() - 3600000 * 120).toISOString(),
     updated_at: new Date(Date.now() - 3600000 * 24).toISOString(),
     status_history: [
-      { from: null, to: 'Naujas', date: new Date(Date.now() - 3600000 * 120).toISOString(), user: 'Admin' },
-      { from: 'Vykdoma', to: 'Laukiama detalių', date: new Date(Date.now() - 3600000 * 24).toISOString(), user: 'Petras' }
+      { from: null, to: 'new', date: new Date(Date.now() - 3600000 * 120).toISOString(), user: 'Admin' },
+      { from: 'in_progress', to: 'waiting_details', date: new Date(Date.now() - 3600000 * 24).toISOString(), user: 'Petras' }
     ],
     assigneeId: 'm2',
     assigneeName: 'Petras Petraitis',
@@ -276,8 +276,8 @@ export const faults: Fault[] = [
         timestamp: Date.now() - 3600000 * 24,
         user: 'Petras',
         actionType: 'SLA_CHANGED_WAITING_FOR_DETAILS',
-        oldStatus: 'Vykdoma',
-        newStatus: 'Laukiama detalių',
+        oldStatus: 'in_progress',
+        newStatus: 'waiting_details',
         reason: 'Laukiama atsarginės dalies iš tiekėjo',
         nextAction: 'Užsakyti dalį',
         newSlaDeadline: Date.now() + 3600000 * 48

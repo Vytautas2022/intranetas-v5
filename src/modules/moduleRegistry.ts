@@ -96,7 +96,7 @@ export const moduleRegistry: ModuleRegistryItem[] = [
     component: "OpsFlowView",
     permissions: ["ops-flow"],
     permissionKey: "ops-flow",
-    sidebarVisibility: "hidden",
+    sidebarVisibility: "none",
     mobileVisible: false,
     category: "hidden",
     group: "Pagrindinis meniu",

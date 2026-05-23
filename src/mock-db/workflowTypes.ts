@@ -8,7 +8,8 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { Status, type Priority } from "../types/faults";
+import type { Priority } from "../types/faults";
+import { getDefaultWorkflowStatuses } from "../logic/workflowStatusRegistry";
 
 export type WorkflowCategory = "DARBAI" | "KONTROLE" | "UZSAKYMAI" | "IDEJOS";
 
@@ -86,14 +87,7 @@ export interface WorkflowType {
   };
 }
 
-const defaultStatuses: WorkflowStatusConfig[] = [
-  { id: Status.NEW, label: "Naujas" },
-  { id: Status.IN_PROGRESS, label: "Vykdoma" },
-  { id: Status.WAITING_DETAILS, label: "Laukiama" },
-  { id: Status.FIXED, label: "Atlikta", terminal: true },
-  { id: Status.REJECTED, label: "Atmesta", terminal: true },
-  { id: Status.SOMEDAY, label: "Kada nors" },
-];
+const defaultStatuses: WorkflowStatusConfig[] = getDefaultWorkflowStatuses();
 
 const defaultPriorities: WorkflowPriorityConfig[] = [
   { id: "low", label: "Žemas", slaHours: 168 },
