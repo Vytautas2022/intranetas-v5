@@ -8,6 +8,7 @@ import {
   canUserApprove 
 } from '../../logic/orderLogic';
 import { UserRole } from '../../types/roles';
+import { ChecklistSection } from '../../components/ChecklistSection';
 
 interface Props {
   orderId: string;
@@ -16,7 +17,7 @@ interface Props {
 }
 
 export const OrderDetailModal: React.FC<Props> = ({ orderId, onClose, currentUser }) => {
-  const { orders, approveOrder, rejectOrder, submitForApproval, advanceOrderStatus, closeOrder, addComment } = useOrders();
+  const { orders, approveOrder, rejectOrder, submitForApproval, advanceOrderStatus, closeOrder, addComment, updateOrderChecklists } = useOrders();
   const order = orders.find(o => o.id === orderId);
   const [comment, setComment] = useState('');
   const [showReject, setShowReject] = useState(false);
@@ -79,6 +80,14 @@ export const OrderDetailModal: React.FC<Props> = ({ orderId, onClose, currentUse
           <thead className="text-slate-500 border-b"><tr><th className="text-left py-2">Prekė</th><th className="text-right py-2">Kiekis</th></tr></thead>
           <tbody>{order.items.map(item => <tr key={item.id} className="border-b last:border-0"><td className="py-2">{item.productName}</td><td className="text-right py-2">{item.quantity}</td></tr>)}</tbody>
         </table>
+
+        <div className="mb-6">
+          <ChecklistSection
+            card={order}
+            currentUser={currentUser}
+            onUpdate={(updates) => updateOrderChecklists(order.id, updates)}
+          />
+        </div>
         
         {/* Comments */}
         <div className="space-y-2 mb-6">

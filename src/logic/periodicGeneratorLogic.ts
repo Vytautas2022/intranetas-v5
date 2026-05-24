@@ -3,6 +3,11 @@ import { PeriodicExecutionRecord } from '../mock-db/periodicHistory';
 import { Fault, Task, Status } from '../types/faults';
 import { Club } from '../mock-db/clubs';
 import { User } from '../mock-db/users';
+import { workflowTypes as defaultWorkflowTypes } from '../mock-db/workflowTypes';
+import {
+  resolvePeriodicDestinationWorkflowTypeId,
+  type ResolvePeriodicDestinationWorkflowContext,
+} from './appWorkflowHelpers';
 
 /**
  * PRODUCTION NOTE:
@@ -90,13 +95,18 @@ export const createPeriodicTaskCard = (
   template: PeriodicTemplate,
   club: Club,
   responsibleUser: User,
-  now: Date = new Date()
+  now: Date = new Date(),
+  workflowContext?: ResolvePeriodicDestinationWorkflowContext
 ): Fault | Task => {
   const dueDate = new Date(now);
   if (template.frequency === 'monthly' || template.recurrence === 'monthly') {
     dueDate.setDate(1); // 1st day of month
     dueDate.setHours(23, 59, 59, 999);
   }
+  const workflowResolution = resolvePeriodicDestinationWorkflowTypeId(template, {
+    workflowTypes: workflowContext?.workflowTypes || defaultWorkflowTypes,
+    fallbackLegacyCategory: workflowContext?.fallbackLegacyCategory || 'OTHER',
+  });
 
   // Assuming Fault/Task interface structure - adjusting for required fields
   return {
@@ -119,6 +129,7 @@ export const createPeriodicTaskCard = (
     due_date: dueDate.getTime(),
     type: 'PERIODIC',
     category: 'PERIODIC',
+    workflowTypeId: workflowResolution.workflowTypeId,
     periodic: {
       isPeriodic: true,
       templateId: template.id,
@@ -145,7 +156,8 @@ export const generatePeriodicTasks = (
   users: User[],
   existingCards: (Fault | Task)[],
   history: PeriodicExecutionRecord[],
-  now: Date = new Date()
+  now: Date = new Date(),
+  workflowContext?: ResolvePeriodicDestinationWorkflowContext
 ): (Fault | Task)[] => {
   const newCards: (Fault | Task)[] = [];
 
@@ -182,7 +194,7 @@ export const generatePeriodicTasks = (
         }
         
         if (user) {
-          newCards.push(createPeriodicTaskCard(template, club, user, now));
+          newCards.push(createPeriodicTaskCard(template, club, user, now, workflowContext));
         }
       }
     });

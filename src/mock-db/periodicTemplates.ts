@@ -1,3 +1,5 @@
+import type { ChecklistTemplate } from "../types/checklists";
+
 export type PeriodicTemplateType = "MANDATORY" | "OPTIONAL";
 export type RecurrenceType =
   | "daily"
@@ -17,6 +19,7 @@ export interface PeriodicTemplate {
   frequency: RecurrenceType; // From prompt: taskTemplate.frequency
   recurrence?: RecurrenceType; // Compatibility
   type: PeriodicTemplateType;
+  destinationWorkflowTypeId?: string;
   targetSubmodule?: "GENERAL" | "EQUIPMENT_FAULT" | "UZSAKYMAI";
   equipmentId?: string;
   issueTypeId?: string;
@@ -43,6 +46,7 @@ export interface PeriodicTemplate {
   weatherDependent?: boolean;
   decisionChecklist: string[];
   executionChecklist: string[];
+  checklistTemplates?: ChecklistTemplate[];
   isActive: boolean;
   createdAt: string | number;
   updatedAt: string | number;

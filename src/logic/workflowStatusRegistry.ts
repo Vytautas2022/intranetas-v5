@@ -51,8 +51,8 @@ export const workflowStatusRegistry: WorkflowStatusDefinition[] = [
     labels: [
       "Laukiama",
       "Laukiama detalių",
-      "Laukiama detaliÅ³",
-      "Laukiama detaliÃ…Â³",
+      "Laukiama detalių",
+      "Laukiama detalių",
       "WAITING",
       "WAITING_DETAILS",
     ],

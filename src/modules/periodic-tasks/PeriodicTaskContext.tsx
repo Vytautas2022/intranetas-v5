@@ -20,6 +20,7 @@ interface PeriodicTaskContextType {
   skipTask: (id: string, reason: string, user: string) => void;
   setInspectionResult: (id: string, result: string, notes: string, user: string) => void;
   markSopViewed: (id: string, user: string) => void;
+  updateInstanceChecklists: (id: string, updates: Partial<PeriodicTaskInstance>) => void;
   createTemplate: (template: PeriodicTaskTemplate) => void;
   updateTemplate: (id: string, updates: Partial<PeriodicTaskTemplate>) => void;
   toggleTemplateActive: (id: string) => void;
@@ -74,6 +75,12 @@ export const PeriodicTaskProvider = ({ children }: { children: ReactNode }) => {
     updateInstance(id, (inst) => taskLogic.markSopViewed(inst, user));
   };
 
+  const updateInstanceChecklists = (id: string, updates: Partial<PeriodicTaskInstance>) => {
+    updateInstance(id, (inst) => {
+      Object.assign(inst, updates);
+    });
+  };
+
   const createTemplate = (template: PeriodicTaskTemplate) => {
     setTemplates(prev => [...prev, template]);
   };
@@ -90,7 +97,7 @@ export const PeriodicTaskProvider = ({ children }: { children: ReactNode }) => {
     <PeriodicTaskContext.Provider value={{
       templates, instances, selectedInstanceId, setSelectedInstanceId,
       refreshInstances, startTask, completeTask, skipTask, setInspectionResult,
-      markSopViewed, createTemplate, updateTemplate, toggleTemplateActive
+      markSopViewed, updateInstanceChecklists, createTemplate, updateTemplate, toggleTemplateActive
     }}>
       {children}
     </PeriodicTaskContext.Provider>

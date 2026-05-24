@@ -2,11 +2,9 @@ import React from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { AlertCircle, X } from "lucide-react";
 import { cn } from "../lib/utils";
-import {
-  workflowIconMap,
-  workflowTypes,
-  WorkflowType,
-} from "../mock-db/workflowTypes";
+import { workflowIconMap, WorkflowType } from "../mock-db/workflowTypes";
+import type { AuthUser } from "../auth/types";
+import { canViewWorkflowResolver } from "../logic/permissionPreviewResolver";
 
 interface HomeActionModalProps {
   isOpen: boolean;
@@ -16,7 +14,8 @@ interface HomeActionModalProps {
     subType?: string,
     workflowTypeId?: string,
   ) => void;
-  workflows?: WorkflowType[];
+  workflows: WorkflowType[];
+  currentUser?: AuthUser;
 }
 
 const categoryLabels: Record<string, string> = {
@@ -32,12 +31,17 @@ export const HomeActionModal: React.FC<HomeActionModalProps> = ({
   isOpen,
   onClose,
   onSelectAction,
-  workflows = workflowTypes,
+  workflows,
+  currentUser,
 }) => {
+  const visibleWorkflows = currentUser
+    ? workflows.filter((workflow) => canViewWorkflowResolver(currentUser, workflow))
+    : workflows;
+
   const groups = categoryOrder
     .map((category) => ({
       name: categoryLabels[category] || category,
-      items: workflows.filter(
+      items: visibleWorkflows.filter(
         (workflow) => workflow.enabled && workflow.category === category,
       ),
     }))

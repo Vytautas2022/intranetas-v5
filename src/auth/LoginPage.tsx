@@ -3,17 +3,30 @@ import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./authContext";
+import { mockUsers } from "./mockUsers";
+import {
+  canAccessRouteResolver,
+  getFirstAllowedRoute,
+} from "../logic/permissionPreviewResolver";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() ?? "";
 const hasGoogleClientId =
   Boolean(GOOGLE_CLIENT_ID) &&
   GOOGLE_CLIENT_ID !== "REPLACE_WITH_GOOGLE_CLIENT_ID" &&
   GOOGLE_CLIENT_ID.endsWith(".apps.googleusercontent.com");
+const mockTestUserEmails = mockUsers
+  .map((user) => user.email)
+  .filter((email) => email.endsWith("@fitsport.lt"));
 
 export const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, loginWithGoogleCredential, isAuthenticated } = useAuth();
+  const {
+    currentUser,
+    login,
+    loginWithGoogleCredential,
+    isAuthenticated,
+  } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -24,6 +37,11 @@ export const LoginPage = () => {
     (location.state as { from?: { pathname?: string } } | null)?.from
       ?.pathname || "/darbai";
 
+  const getSafeRedirectPath = (user = currentUser) => {
+    if (!user) return "/darbai";
+    return canAccessRouteResolver(user, from) ? from : getFirstAllowedRoute(user);
+  };
+
   useEffect(() => {
     console.log(import.meta.env.VITE_GOOGLE_CLIENT_ID);
     console.log("ENV CLIENT ID:", import.meta.env.VITE_GOOGLE_CLIENT_ID);
@@ -32,7 +50,7 @@ export const LoginPage = () => {
   }, []);
 
   if (isAuthenticated) {
-    return <Navigate to={from} replace />;
+    return <Navigate to={getSafeRedirectPath()} replace />;
   }
 
   const handleGoogleSuccess = async (response: CredentialResponse) => {
@@ -60,7 +78,7 @@ export const LoginPage = () => {
       return;
     }
 
-    navigate(from, { replace: true });
+    navigate(getSafeRedirectPath(result.user), { replace: true });
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -77,7 +95,7 @@ export const LoginPage = () => {
       return;
     }
 
-    navigate(from, { replace: true });
+    navigate(getSafeRedirectPath(result.user), { replace: true });
   };
 
   return (
@@ -174,6 +192,24 @@ export const LoginPage = () => {
             {isLoading && <Loader2 size={18} className="animate-spin" />}
             Prisijungti
           </button>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Mock test users
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {mockTestUserEmails.map((mockEmail) => (
+                <button
+                  key={mockEmail}
+                  type="button"
+                  onClick={() => setEmail(mockEmail)}
+                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:text-slate-950"
+                >
+                  {mockEmail}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {hasGoogleClientId && (
             <div className="space-y-3">

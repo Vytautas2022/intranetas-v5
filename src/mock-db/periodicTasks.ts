@@ -4,6 +4,7 @@ import {
   HistoryItem,
   AssignedTo,
 } from "../types/common";
+import type { Checklist, ChecklistTemplate } from "../types/checklists";
 
 export type RecurrenceType =
   | "daily"
@@ -43,10 +44,12 @@ export interface PeriodicTaskTemplate {
   category: PeriodicTaskCategory;
   type: PeriodicTaskType;
   recurrence: RecurrenceType;
+  destinationWorkflowTypeId?: string;
   sopLink?: string;
   supplierId?: string;
   supplierName?: string;
   plannedCost?: number;
+  checklistTemplates?: ChecklistTemplate[];
   // New fields
   schedule?: string[];
   isMandatory?: boolean;
@@ -105,6 +108,7 @@ export interface PeriodicTaskInstance {
   attachments?: Attachment[];
   comments: CommentItem[];
   history: HistoryItem[];
+  checklists?: Checklist[];
   updatedAt: number;
   updatedBy: string;
   // Tracking

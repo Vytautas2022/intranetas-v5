@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { usePeriodicTasks } from './PeriodicTaskContext';
 import { getPeriodicTaskStatusLabel, getPeriodicTaskCategoryLabel, canComplete } from '../../logic/periodicTaskLogic';
 import { periodicTaskTemplates } from '../../mock-db/periodicTasks';
+import { ChecklistSection } from '../../components/ChecklistSection';
 
 interface Props {
   instanceId: string;
@@ -10,7 +11,7 @@ interface Props {
 }
 
 export const TaskInstanceDetailModal: React.FC<Props> = ({ instanceId, onClose, currentUser }) => {
-  const { instances, startTask, completeTask, skipTask, setInspectionResult, markSopViewed } = usePeriodicTasks();
+  const { instances, startTask, completeTask, skipTask, setInspectionResult, markSopViewed, updateInstanceChecklists } = usePeriodicTasks();
   const instance = instances.find(i => i.id === instanceId);
   const template = useMemo(() => {
     if (!instance) return null;
@@ -71,6 +72,12 @@ export const TaskInstanceDetailModal: React.FC<Props> = ({ instanceId, onClose, 
         {instance.status === 'IN_PROGRESS' && (
             <textarea value={notes} onChange={e => setNotes(e.target.value)} className="w-full p-2 border rounded text-xs mb-4" placeholder="Pastabos..." />
         )}
+
+        <ChecklistSection
+          card={instance}
+          currentUser={currentUser}
+          onUpdate={(updates) => updateInstanceChecklists(instance.id, updates)}
+        />
       </div>
     </div>
   );

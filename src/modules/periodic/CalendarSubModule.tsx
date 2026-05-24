@@ -44,6 +44,10 @@ import { TemplateEditModal } from "../periodic-tasks/TemplateEditModal";
 import { PeriodicTemplate } from "../../mock-db/periodicTemplates";
 import { cn } from "../../lib/utils";
 import { createAuditLogEntry } from "../../logic/auditLogic";
+import {
+  workflowTypes as defaultWorkflowTypes,
+  type WorkflowType,
+} from "../../mock-db/workflowTypes";
 
 interface PeriodicTaskHistory {
   id: string;
@@ -156,7 +160,17 @@ const ClubDropdown = ({
   );
 };
 
-export const PeriodicCalendarSubModule: React.FC = () => {
+interface PeriodicCalendarSubModuleProps {
+  templates?: any[];
+  setTemplates?: React.Dispatch<React.SetStateAction<any[]>>;
+  workflowTypes?: WorkflowType[];
+}
+
+export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps> = ({
+  templates = mockPeriodicTemplates,
+  setTemplates,
+  workflowTypes = defaultWorkflowTypes,
+}) => {
   const [year] = useState(new Date().getFullYear());
   const [filters, setFilters] = useState({
     region: "",
@@ -194,7 +208,7 @@ export const PeriodicCalendarSubModule: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<any | null>(null);
-  const [localTemplates, setLocalTemplates] = useState<any[]>(mockPeriodicTemplates);
+  const [localTemplates, setLocalTemplates] = useState<any[]>(templates);
   
   // Occurrence logic
   const dateRange = useMemo(() => {
@@ -471,6 +485,7 @@ export const PeriodicCalendarSubModule: React.FC = () => {
           canRestore: false
         });
       }
+      setTemplates?.(next);
       return next;
     });
     setIsModalOpen(false);
@@ -1239,6 +1254,7 @@ export const PeriodicCalendarSubModule: React.FC = () => {
           onSave={handleSaveTemplate}
           clubs={clubs}
           users={users}
+          workflowTypes={workflowTypes}
         />
       )}
 
@@ -1470,12 +1486,14 @@ const TemplateEditModalImproved = ({
   onSave,
   clubs,
   users,
+  workflowTypes,
 }: {
   template: any;
   onClose: () => void;
   onSave: (val: any) => void;
   clubs: any[];
   users: any[];
+  workflowTypes: WorkflowType[];
 }) => {
   const [formData, setFormData] = useState({ 
     ...template,
@@ -1494,6 +1512,13 @@ const TemplateEditModalImproved = ({
     copyDescription: true,
     copyAttachments: true
   });
+  const activeWorkflowTypes = useMemo(
+    () =>
+      workflowTypes
+        .filter((workflow) => Boolean(workflow.active ?? workflow.enabled))
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)),
+    [workflowTypes],
+  );
 
   const validateAndSave = () => {
     if (!formData.title?.trim()) {
@@ -1789,6 +1814,32 @@ const TemplateEditModalImproved = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5 ml-1">
+                  Kurti kortelę workflow
+                </label>
+                <select
+                  value={formData.destinationWorkflowTypeId || ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      destinationWorkflowTypeId: e.target.value || undefined,
+                    })
+                  }
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#d9f945] font-bold"
+                >
+                  <option value="">Nepasirinkta</option>
+                  {activeWorkflowTypes.map((workflow) => (
+                    <option key={workflow.id} value={workflow.id}>
+                      {workflow.label || workflow.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-[10px] font-semibold text-slate-400 leading-relaxed ml-1">
+                  Pasirinktas workflow nustato, kuriame Kanban atsiras periodinio darbo kortelė.
+                </p>
               </div>
 
               <div>

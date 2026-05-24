@@ -1,3 +1,5 @@
+import type { Checklist } from "../types/checklists";
+
 export interface FaultMedia {
   type: "image" | "video";
   url: string;
@@ -123,6 +125,7 @@ export interface Fault {
     inspectionDecision?: "NOT_CHECKED" | "OK_NO_ACTION" | "ACTION_NEEDED"
     rescheduleCount?: number
   };
+  checklists?: Checklist[];
 }
 
 export const faults: Fault[] = [

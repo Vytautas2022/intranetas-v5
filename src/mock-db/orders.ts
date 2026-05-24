@@ -1,4 +1,5 @@
 import { Attachment, CommentItem, HistoryItem } from '../types/common';
+import type { Checklist } from '../types/checklists';
 
 export type OrderStatus = 
   "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "ORDERED" | 
@@ -63,6 +64,7 @@ export interface Order {
   notes?: string;
   updatedAt: number;
   updatedBy: string;
+  checklists?: Checklist[];
   periodic?: {
     isPeriodic: boolean;
     templateId: string;

@@ -1,5 +1,6 @@
 import type { Club } from "../mock-db/clubs";
 import type { User } from "../mock-db/users";
+import type { AuthUser } from "../auth/types";
 import type { WorkflowType } from "../mock-db/workflowTypes";
 import type { Fault } from "../types/faults";
 import { filterFaults } from "./faultFilter";
@@ -10,6 +11,129 @@ import {
   sanitizeWorkflowStatusConfig,
 } from "./workflowStatusRegistry";
 import { normalizeWorkflowStatusId } from "./statusLabels";
+import { canAccessModule } from "./permissionEngine";
+import { canViewWorkflowResolver } from "./permissionPreviewResolver";
+
+type WorkflowVisibilityUser =
+  | User
+  | (AuthUser & { assignedRoleIds?: string[] });
+
+type PeriodicDestinationTemplate = {
+  destinationWorkflowTypeId?: string;
+  targetSubmodule?: string;
+  category?: string;
+  type?: string;
+};
+
+export type PeriodicDestinationWorkflowResolutionSource =
+  | "explicit"
+  | "legacy"
+  | "fallback"
+  | "none";
+
+export interface PeriodicDestinationWorkflowResolution {
+  workflowTypeId?: string;
+  source: PeriodicDestinationWorkflowResolutionSource;
+  warnings: string[];
+}
+
+export interface ResolvePeriodicDestinationWorkflowContext {
+  workflowTypes: WorkflowType[];
+  fallbackLegacyCategory?: string;
+}
+
+const getActiveWorkflowById = (
+  workflowTypes: WorkflowType[],
+  workflowTypeId?: string,
+): WorkflowType | undefined =>
+  workflowTypeId
+    ? workflowTypes.find(
+        (workflow) =>
+          workflow.id === workflowTypeId &&
+          Boolean(workflow.active ?? workflow.enabled),
+      )
+    : undefined;
+
+const getActiveWorkflowByLegacyCategory = (
+  workflowTypes: WorkflowType[],
+  legacyCategory?: string,
+): WorkflowType | undefined =>
+  legacyCategory
+    ? workflowTypes.find(
+        (workflow) =>
+          workflow.legacyCategory === legacyCategory &&
+          Boolean(workflow.active ?? workflow.enabled),
+      )
+    : undefined;
+
+const getPeriodicLegacyCandidates = (
+  template: PeriodicDestinationTemplate,
+): string[] => {
+  const candidates = [
+    template.targetSubmodule,
+    template.category,
+    template.type,
+  ].filter((value): value is string => Boolean(value));
+
+  return Array.from(new Set(candidates));
+};
+
+export const resolvePeriodicDestinationWorkflowTypeId = (
+  template: PeriodicDestinationTemplate,
+  context: ResolvePeriodicDestinationWorkflowContext,
+): PeriodicDestinationWorkflowResolution => {
+  const warnings: string[] = [];
+  const explicitWorkflow = getActiveWorkflowById(
+    context.workflowTypes,
+    template.destinationWorkflowTypeId,
+  );
+
+  if (explicitWorkflow) {
+    return {
+      workflowTypeId: explicitWorkflow.id,
+      source: "explicit",
+      warnings,
+    };
+  }
+
+  if (template.destinationWorkflowTypeId) {
+    warnings.push("INVALID_DESTINATION_WORKFLOW_TYPE_ID");
+  }
+
+  // Compatibility only: legacy templates did not store a destination workflow.
+  for (const legacyCategory of getPeriodicLegacyCandidates(template)) {
+    const legacyWorkflow = getActiveWorkflowByLegacyCategory(
+      context.workflowTypes,
+      legacyCategory,
+    );
+
+    if (legacyWorkflow) {
+      return {
+        workflowTypeId: legacyWorkflow.id,
+        source: "legacy",
+        warnings,
+      };
+    }
+  }
+
+  const fallbackWorkflow = getActiveWorkflowByLegacyCategory(
+    context.workflowTypes,
+    context.fallbackLegacyCategory,
+  );
+
+  if (fallbackWorkflow) {
+    return {
+      workflowTypeId: fallbackWorkflow.id,
+      source: "fallback",
+      warnings,
+    };
+  }
+
+  return {
+    source: "none",
+    warnings,
+  };
+};
 
 export const applyWorkflowMigration = (
   items: Fault[],
@@ -101,11 +225,13 @@ export interface FilterBoardEntitiesParams {
   typeFilters: string[];
   sourceFilter: string;
   appUsers: User[];
-  currentUser: User;
+  currentUser: WorkflowVisibilityUser;
   assigneeFilter: string;
   quickFilter: string;
   periodicFilter: "ALL" | "PERIODIC" | "SIMPLE";
   clubFilter: string;
+  selectedWorkflowTypeIds?: string[];
+  permittedWorkflowTypeIds?: string[];
 }
 
 export const filterBoardEntities = ({
@@ -123,6 +249,8 @@ export const filterBoardEntities = ({
   quickFilter,
   periodicFilter,
   clubFilter,
+  selectedWorkflowTypeIds,
+  permittedWorkflowTypeIds,
 }: FilterBoardEntitiesParams): Fault[] => {
   const base = scopedEntities.filter((item) => {
     if (item.isDeleted) return false;
@@ -196,6 +324,17 @@ export const filterBoardEntities = ({
       (periodicFilter === "PERIODIC" && fault.source === "PERIODIC") ||
       (periodicFilter === "SIMPLE" && fault.source !== "PERIODIC");
 
+    const matchesWorkflowType =
+      selectedWorkflowTypeIds && selectedWorkflowTypeIds.length > 0
+        ? Boolean(
+            fault.workflowTypeId &&
+              selectedWorkflowTypeIds.includes(fault.workflowTypeId) &&
+              (!permittedWorkflowTypeIds ||
+                permittedWorkflowTypeIds.includes(fault.workflowTypeId)),
+          )
+        : !permittedWorkflowTypeIds ||
+          Boolean(fault.workflowTypeId && permittedWorkflowTypeIds.includes(fault.workflowTypeId));
+
     return (
       matchesSearch &&
       matchesSla &&
@@ -203,7 +342,8 @@ export const filterBoardEntities = ({
       matchesType &&
       matchesSource &&
       matchesAssignee &&
-      matchesPeriodic
+      matchesPeriodic &&
+      matchesWorkflowType
     );
   });
 
@@ -213,10 +353,18 @@ export const filterBoardEntities = ({
 export const getActiveDarbaiWorkflowIds = (
   workflowTypes: WorkflowType[],
   typeFilters: string[],
+  selectedWorkflowTypeIds: string[] = [],
+  currentUser?: WorkflowVisibilityUser,
 ): string[] =>
   workflowTypes
     .filter((workflow) => {
-      if (!workflow.enabled || workflow.category !== "DARBAI") return false;
+      if (!workflow.enabled) return false;
+      if (currentUser && !canViewWorkflowResolver(currentUser, workflow)) {
+        return false;
+      }
+      if (selectedWorkflowTypeIds.length > 0) {
+        return selectedWorkflowTypeIds.includes(workflow.id);
+      }
       if (typeFilters.length === 0) return true;
       return typeFilters.some(
         (filter) =>
@@ -224,6 +372,30 @@ export const getActiveDarbaiWorkflowIds = (
       );
     })
     .map((workflow) => workflow.id);
+
+export const canViewWorkflowType = (
+  workflow: WorkflowType,
+  currentUser: WorkflowVisibilityUser,
+): boolean => {
+  return canViewWorkflowResolver(currentUser, workflow);
+};
+
+export const getActiveWorkflowTypesForModule = (
+  workflowTypes: WorkflowType[],
+  moduleId: string,
+  currentUser: WorkflowVisibilityUser,
+): WorkflowType[] => {
+  if (!canAccessModule(currentUser as any, moduleId)) return [];
+
+  return workflowTypes
+    .filter((workflow) => {
+      const moduleMatches =
+        moduleId === "darbai" || workflow.moduleId === moduleId;
+      const active = workflow.active ?? workflow.enabled;
+      return moduleMatches && active && canViewWorkflowType(workflow, currentUser);
+    })
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+};
 
 export const hasUnmappedWorkflowStatuses = (entities: Fault[]): boolean =>
   entities.some(

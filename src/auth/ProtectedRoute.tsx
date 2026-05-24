@@ -1,7 +1,7 @@
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./authContext";
-import { canAccessRoute } from "../logic/permissionEngine";
+import { canAccessRouteResolver } from "../logic/permissionPreviewResolver";
 
 export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser, isAuthenticated } = useAuth();
@@ -11,7 +11,7 @@ export const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (!canAccessRoute(currentUser, location.pathname)) {
+  if (!canAccessRouteResolver(currentUser, location.pathname)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white text-lg text-slate-400">
         Prieiga uždrausta

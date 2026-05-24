@@ -5,15 +5,6 @@ import {
   UNKNOWN_STATUS_LANE_ID,
 } from "./workflowStatusRegistry";
 
-const FALLBACK_KANBAN_LANES = [
-  Status.NEW,
-  Status.IN_PROGRESS,
-  Status.WAITING_DETAILS,
-  Status.FIXED,
-  Status.REJECTED,
-  Status.SOMEDAY,
-];
-
 export const getWorkflowKanbanLanes = (
   workflowTypes: WorkflowType[],
   options: {
@@ -40,8 +31,7 @@ export const getWorkflowKanbanLanes = (
     getSupportedWorkflowLanes(workflow),
   );
 
-  const lanes = configuredLanes.length ? configuredLanes : FALLBACK_KANBAN_LANES;
-  const uniqueLanes = Array.from(new Set(lanes)).filter(
+  const uniqueLanes = Array.from(new Set(configuredLanes)).filter(
     (lane) => lane && lane !== Status.MOVED,
   );
 

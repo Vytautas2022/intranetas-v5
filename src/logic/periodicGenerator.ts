@@ -1,6 +1,7 @@
 import { PeriodicTaskTemplate, PeriodicTaskInstance } from '../mock-db/periodicTasks';
 import { Club } from '../mock-db/clubs';
 import { format } from 'date-fns';
+import { cloneChecklistTemplatesForGeneratedCard } from './checklistLogic';
 
 export const generatePeriodicKanbanCards = (
   templates: PeriodicTaskTemplate[],
@@ -31,6 +32,7 @@ export const generatePeriodicKanbanCards = (
             clubName: club.name,
             comments: [],
             history: [{ type: 'PERIODIC_INSTANCE_CREATED', user: 'system', date: Date.now(), meta: { templateId: template.id, clubId: club.id } }],
+            checklists: cloneChecklistTemplatesForGeneratedCard(template),
             updatedAt: Date.now(),
             updatedBy: 'system',
             metadata: { periodKey: currentPeriodKey }

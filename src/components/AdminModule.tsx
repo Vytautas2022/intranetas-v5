@@ -22,13 +22,24 @@ import {
   RotateCcw as History,
   RefreshCw,
   FileText,
+  ShieldCheck,
   Workflow,
 } from "lucide-react";
 import { AuditAdmin } from "./AuditAdmin";
+import { useAuth } from "../auth/authContext";
+import type { AuthUser } from "../auth/types";
 import { createAuditLogEntry } from "../logic/auditLogic";
 import { cn } from "../lib/utils";
 import { getProductAnalytics } from "../logic/inventoryLogic";
 import { generateUniqueId } from "../logic/idLogic";
+import {
+  canAccessAdminTabResolver,
+  compareLegacyVsResolverAccess,
+  compareLegacyVsResolverWorkflowAccess,
+  resolveEffectivePermissionPreview,
+  resolveUserAssignedRoles,
+  type PermissionPreviewConfig,
+} from "../logic/permissionPreviewResolver";
 import { productTransfers } from "../mock-db/transfers";
 import { clubs as initialClubs, Club } from "../mock-db/clubs";
 import {
@@ -52,7 +63,23 @@ import {
   WorkflowType,
 } from "../mock-db/workflowTypes";
 import {
+  adminRightsPermissions as initialAdminRightsPermissions,
+  moduleAccessPermissions as initialModuleAccessPermissions,
+  objectScopePermissions as initialObjectScopePermissions,
+  permissionRoles as initialPermissionRoles,
+  tenantScopePermissions as initialTenantScopePermissions,
+  workflowAccessPermissions as initialWorkflowAccessPermissions,
+  type AdminRightsPermission,
+  type ModuleAccessPermission,
+  type ObjectScopePermission,
+  type ObjectScopeType,
+  type PermissionRole,
+  type TenantScopePermission,
+  type WorkflowAccessPermission,
+} from "../mock-db/permissions";
+import {
   getAdminTabRoutePath,
+  moduleRegistry,
   type AdminModuleTabId,
 } from "../modules/moduleRegistry";
 
@@ -93,6 +120,54 @@ interface AdminModuleProps {
   ) => void;
 }
 
+type AdminNavigationGroup =
+  | "Organization"
+  | "Workflow System"
+  | "Assets / Objects"
+  | "Automations"
+  | "Analytics & Monitoring"
+  | "Integrations"
+  | "Legacy / Internal";
+
+type AdminNavigationVisibility = "visible" | "hidden";
+
+interface AdminNavigationItem {
+  id: AdminModuleTabId;
+  label: string;
+  group: AdminNavigationGroup;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  visibility: AdminNavigationVisibility;
+}
+
+const adminNavigationItems: AdminNavigationItem[] = [
+  { id: "clubs", label: "Padaliniai", group: "Organization", icon: MapPin, visibility: "visible" },
+  { id: "cities", label: "Miestai / Regionai", group: "Organization", icon: Building, visibility: "visible" },
+  { id: "users", label: "Vartotojai", group: "Organization", icon: Users, visibility: "visible" },
+  { id: "roles_permissions", label: "Roles & Permissions", group: "Organization", icon: ShieldCheck, visibility: "visible" },
+  { id: "workflow_types", label: "Workflow Types", group: "Workflow System", icon: Workflow, visibility: "visible" },
+  { id: "equipment", label: "Treniruokliai", group: "Assets / Objects", icon: Dumbbell, visibility: "visible" },
+  { id: "facility", label: "Patalpų darbai", group: "Assets / Objects", icon: Wrench, visibility: "visible" },
+  { id: "equipment_issues", label: "Gedimo tipas", group: "Assets / Objects", icon: Activity, visibility: "visible" },
+  { id: "inventory", label: "Užsakymai", group: "Assets / Objects", icon: Package, visibility: "visible" },
+  { id: "periodiniai", label: "Periodiniai darbai", group: "Automations", icon: RefreshCw, visibility: "visible" },
+  { id: "audit", label: "Auditas", group: "Analytics & Monitoring", icon: FileText, visibility: "visible" },
+  { id: "periodic_templates", label: "Periodiniai šablonai", group: "Legacy / Internal", icon: History, visibility: "hidden" },
+];
+
+const adminNavigationGroups: AdminNavigationGroup[] = [
+  "Organization",
+  "Workflow System",
+  "Assets / Objects",
+  "Automations",
+  "Analytics & Monitoring",
+  "Integrations",
+  "Legacy / Internal",
+];
+
+const visibleAdminNavigationItems = adminNavigationItems.filter(
+  (item) => item.visibility === "visible",
+);
+
 export const AdminModule: React.FC<AdminModuleProps> = ({
   products,
   setProducts,
@@ -125,52 +200,134 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { currentUser } = useAuth();
   const path = location.pathname;
+  const [permissionRoles, setPermissionRoles] =
+    useState<PermissionRole[]>(initialPermissionRoles);
+  const [permissionModuleAccess, setPermissionModuleAccess] = useState<
+    ModuleAccessPermission[]
+  >(initialModuleAccessPermissions);
+  const [permissionWorkflowAccess, setPermissionWorkflowAccess] = useState<
+    WorkflowAccessPermission[]
+  >(initialWorkflowAccessPermissions);
+  const [permissionObjectScopes, setPermissionObjectScopes] = useState<
+    ObjectScopePermission[]
+  >(initialObjectScopePermissions);
+  const [permissionTenantScopes, setPermissionTenantScopes] = useState<
+    TenantScopePermission[]
+  >(initialTenantScopePermissions);
+  const [permissionAdminRights, setPermissionAdminRights] = useState<
+    AdminRightsPermission[]
+  >(initialAdminRightsPermissions);
+  const permissionPreviewConfig: PermissionPreviewConfig = {
+    roles: permissionRoles,
+    moduleAccess: permissionModuleAccess,
+    workflowAccess: permissionWorkflowAccess,
+    objectScopes: permissionObjectScopes,
+    tenantScopes: permissionTenantScopes,
+    adminRights: permissionAdminRights,
+  };
+  const legacyPeriodicTemplatesRoute = getAdminTabRoutePath("periodic_templates");
+  const isLegacyPeriodicTemplatesRoute = Boolean(
+    legacyPeriodicTemplatesRoute && path.includes(legacyPeriodicTemplatesRoute),
+  );
+
+  useEffect(() => {
+    if (isLegacyPeriodicTemplatesRoute) {
+      // Legacy periodic template editing is disabled. Use System Administration → Periodiniai darbai.
+      navigate(getAdminTabRoutePath("periodiniai") || "/admin/periodiniai", {
+        replace: true,
+      });
+    }
+  }, [isLegacyPeriodicTemplatesRoute, navigate]);
 
   // console.log("Current route:", path);
 
-  const tabs = [
-    { id: "cities", label: "Miestai", icon: Building },
-    { id: "clubs", label: "Padaliniai", icon: MapPin },
-    { id: "users", label: "Vartotojai", icon: Users },
-    { id: "facility", label: "Patalpų darbai", icon: Wrench },
-    { id: "equipment", label: "Treniruokliai", icon: Dumbbell },
-    { id: "equipment_issues", label: "Gedimo tipas", icon: Activity },
-    { id: "inventory", label: "Užsakymai", icon: Package },
-    { id: "workflow_types", label: "Workflow Types", icon: Workflow },
-    { id: "periodiniai", label: "Periodiniai darbai", icon: RefreshCw },
-    { id: "audit", label: "Auditas", icon: FileText },
-  ] as const;
 
   const getTabRoute = (tabId: AdminModuleTabId) =>
     getAdminTabRoutePath(tabId) || "/admin/vartotojai";
+  const visibleAdminItemsForUser = visibleAdminNavigationItems.filter((item) =>
+    canAccessAdminTabResolver(currentUser, item.id),
+  );
 
   return (
-    <div className="p-0 md:p-6 min-h-full md:h-full flex flex-col gap-3 md:gap-6 bg-white md:bg-transparent">
-      {/* Tabs */}
-      <div className="flex gap-1 p-2 bg-white md:bg-transparent border-b md:border-0 overflow-x-auto scrollbar-hide shrink-0">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => navigate(getTabRoute(tab.id))}
-            className={`flex items-center gap-2 px-3 py-2 font-semibold text-[13px] transition-colors rounded-lg whitespace-nowrap ${
-              path.includes(getTabRoute(tab.id))
-                ? "bg-slate-100 text-slate-900"
-                : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            <tab.icon size={14} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+    <div className="p-0 md:p-6 min-h-full md:h-full bg-white md:bg-transparent">
+      <div className="h-full min-h-0 flex flex-col md:flex-row bg-white md:rounded-3xl md:border md:border-slate-200 md:shadow-sm overflow-hidden">
+        <aside className="md:w-72 md:shrink-0 border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/70">
+          <div className="h-full overflow-x-auto md:overflow-x-visible md:overflow-y-auto p-3">
+            <nav className="flex md:flex-col gap-4 md:gap-5 min-w-max md:min-w-0">
+              {adminNavigationGroups.map((group) => {
+                const groupItems = visibleAdminItemsForUser.filter(
+                  (item) => item.group === group,
+                );
+                if (!groupItems.length) return null;
 
-      <div className="flex-1 bg-white md:rounded-3xl md:border md:border-slate-200 md:shadow-sm flex flex-col min-h-0 w-full overflow-visible">
+                return (
+                  <div key={group} className="space-y-1.5">
+                    <div className="px-2 text-[9px] font-black uppercase tracking-[0.18em] text-slate-400 whitespace-nowrap">
+                      {group}
+                    </div>
+                    <div className="flex md:flex-col gap-1">
+                      {groupItems.map((tab) => {
+                        const active = path.includes(getTabRoute(tab.id));
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={() => navigate(getTabRoute(tab.id))}
+                            className={cn(
+                              "flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-semibold transition-colors whitespace-nowrap text-left",
+                              active
+                                ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/70"
+                                : "text-slate-500 hover:text-slate-800 hover:bg-white/70",
+                            )}
+                          >
+                            <tab.icon
+                              size={15}
+                              className={active ? "text-slate-900" : "text-slate-400"}
+                            />
+                            <span className="truncate">{tab.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </nav>
+          </div>
+        </aside>
+
+        <div className="flex-1 flex flex-col min-h-0 w-full overflow-visible">
         {path.includes(getTabRoute("cities")) && (
           <CitiesAdmin cities={cities} setCities={setCities} />
         )}
         {path.includes(getTabRoute("users")) && (
-          <UsersAdmin users={users} setUsers={setUsers} clubs={clubs} />
+          <UsersAdmin
+            users={users}
+            setUsers={setUsers}
+            clubs={clubs}
+            permissionRoles={permissionRoles}
+            permissionsConfig={permissionPreviewConfig}
+          />
+        )}
+        {path.includes(getTabRoute("roles_permissions")) &&
+          canAccessAdminTabResolver(currentUser, "roles_permissions") && (
+          <RolesPermissionsPlaceholder
+            roles={permissionRoles}
+            setRoles={setPermissionRoles}
+            moduleAccess={permissionModuleAccess}
+            setModuleAccess={setPermissionModuleAccess}
+            workflowAccess={permissionWorkflowAccess}
+            setWorkflowAccess={setPermissionWorkflowAccess}
+            objectScopes={permissionObjectScopes}
+            setObjectScopes={setPermissionObjectScopes}
+            tenantScopes={permissionTenantScopes}
+            setTenantScopes={setPermissionTenantScopes}
+            adminRights={permissionAdminRights}
+            setAdminRights={setPermissionAdminRights}
+            users={users}
+            currentUser={currentUser}
+          />
         )}
         {path.includes(getTabRoute("clubs")) && (
           <ClubsAdmin
@@ -189,7 +346,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             clubs={clubs}
           />
         )}
-        {path.includes(getTabRoute("periodic_templates")) && (
+        {!isLegacyPeriodicTemplatesRoute && path.includes(getTabRoute("periodic_templates")) && (
           <PeriodicTemplatesAdmin
             templates={periodicTemplates}
             setTemplates={setPeriodicTemplates}
@@ -227,13 +384,16 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             onSubTabChange={onSubTabChange as any}
           />
         )}
-        {path.includes(getTabRoute("workflow_types")) && (
+        {path.includes(getTabRoute("workflow_types")) &&
+          canAccessAdminTabResolver(currentUser, "workflow_types") && (
           <WorkflowTypesAdmin
             workflows={workflowTypes}
             setWorkflows={setWorkflowTypes}
           />
         )}
-        {path.includes(getTabRoute("audit")) && <AuditAdmin />}
+        {path.includes(getTabRoute("audit")) &&
+          canAccessAdminTabResolver(currentUser, "audit") && <AuditAdmin />}
+        </div>
       </div>
     </div>
   );
@@ -242,6 +402,1136 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 // ==========================================
 // Submodules
 // ==========================================
+
+function RolesPermissionsPlaceholder({
+  roles,
+  setRoles,
+  moduleAccess,
+  setModuleAccess,
+  workflowAccess,
+  setWorkflowAccess,
+  objectScopes,
+  setObjectScopes,
+  tenantScopes,
+  setTenantScopes,
+  adminRights,
+  setAdminRights,
+  users,
+  currentUser,
+}: {
+  roles: PermissionRole[];
+  setRoles: React.Dispatch<React.SetStateAction<PermissionRole[]>>;
+  moduleAccess: ModuleAccessPermission[];
+  setModuleAccess: React.Dispatch<React.SetStateAction<ModuleAccessPermission[]>>;
+  workflowAccess: WorkflowAccessPermission[];
+  setWorkflowAccess: React.Dispatch<
+    React.SetStateAction<WorkflowAccessPermission[]>
+  >;
+  objectScopes: ObjectScopePermission[];
+  setObjectScopes: React.Dispatch<React.SetStateAction<ObjectScopePermission[]>>;
+  tenantScopes: TenantScopePermission[];
+  setTenantScopes: React.Dispatch<React.SetStateAction<TenantScopePermission[]>>;
+  adminRights: AdminRightsPermission[];
+  setAdminRights: React.Dispatch<React.SetStateAction<AdminRightsPermission[]>>;
+  users: User[];
+  currentUser: AuthUser | null;
+}) {
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+  const [activePermissionsTab, setActivePermissionsTab] = useState<
+    "roles" | "migration"
+  >("roles");
+  const [roleSearchQuery, setRoleSearchQuery] = useState("");
+  const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id || "");
+  const [showMigrationDetails, setShowMigrationDetails] = useState(false);
+
+  type ModulePermissionKey =
+    | "canView"
+    | "canCreate"
+    | "canEdit"
+    | "canAdmin";
+  type WorkflowPermissionKey =
+    | "canView"
+    | "canCreate"
+    | "canTransition"
+    | "canClose"
+    | "canApprove"
+    | "canViewAnalytics";
+  type AdminRightsKey = keyof Omit<AdminRightsPermission, "roleId">;
+
+  const visibleModules = moduleRegistry
+    .filter((module) => module.category !== "hidden")
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const activeWorkflows = initialWorkflowTypes
+    .filter((workflow) => workflow.active !== false && workflow.enabled !== false)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const modulePermissionKeys: Array<{
+    key: ModulePermissionKey;
+    label: string;
+  }> = [
+    { key: "canView", label: "View" },
+    { key: "canCreate", label: "Create" },
+    { key: "canEdit", label: "Edit" },
+    { key: "canAdmin", label: "Admin" },
+  ];
+  const workflowPermissionKeys: Array<{
+    key: WorkflowPermissionKey;
+    label: string;
+  }> = [
+    { key: "canView", label: "View" },
+    { key: "canCreate", label: "Create" },
+    { key: "canTransition", label: "Transition" },
+    { key: "canClose", label: "Close" },
+    { key: "canApprove", label: "Approve" },
+    { key: "canViewAnalytics", label: "Analytics" },
+  ];
+  const adminRightsKeys: Array<{ key: AdminRightsKey; label: string }> = [
+    { key: "canManageUsers", label: "Users" },
+    { key: "canManageRoles", label: "Roles" },
+    { key: "canManageWorkflowTypes", label: "Workflow Types" },
+    { key: "canManageSLA", label: "SLA" },
+    { key: "canManageAutomations", label: "Automations" },
+    { key: "canManageIntegrations", label: "Integrations" },
+  ];
+  const permissionsConfig: PermissionPreviewConfig = {
+    roles,
+    moduleAccess,
+    workflowAccess,
+    objectScopes,
+    tenantScopes,
+    adminRights,
+  };
+  const shadowModeComparisons = users.flatMap((user) =>
+    compareLegacyVsResolverAccess(user, permissionsConfig),
+  );
+  const shadowModeMismatches = shadowModeComparisons.filter(
+    (comparison) => comparison.mismatch,
+  );
+  const workflowShadowComparisons = users.flatMap((user) =>
+    compareLegacyVsResolverWorkflowAccess(
+      user,
+      activeWorkflows,
+      permissionsConfig,
+    ),
+  );
+  const workflowShadowMismatches = workflowShadowComparisons.filter(
+    (comparison) => comparison.mismatch,
+  );
+  const workflowLegacyFallbackCount = workflowShadowComparisons.filter(
+    (comparison) => comparison.resolverDataMissing,
+  ).length;
+  const canViewMigrationCheck =
+    currentUser?.role === "SUPER_ADMIN" ||
+    currentUser?.effectiveRoles?.some((role) =>
+      `${role.id} ${role.name}`.toUpperCase().includes("DEV"),
+    ) ||
+    false;
+  const getHydratedRolePreview = (user: User) => {
+    const preview = resolveEffectivePermissionPreview(user, permissionsConfig);
+    return {
+      assignedRoles: preview.assignedRoles.map((role) => role.name).join(", "),
+      effectiveRoles: preview.assignedRoles.map((role) => role.name).join(", "),
+    };
+  };
+
+  useEffect(() => {
+    if (!canViewMigrationCheck && activePermissionsTab === "migration") {
+      setActivePermissionsTab("roles");
+    }
+  }, [activePermissionsTab, canViewMigrationCheck]);
+
+  useEffect(() => {
+    if (!roles.length) {
+      setSelectedRoleId("");
+      return;
+    }
+
+    if (!roles.some((role) => role.id === selectedRoleId)) {
+      setSelectedRoleId(roles[0].id);
+    }
+  }, [roles, selectedRoleId]);
+
+  const filteredRoles = roles.filter((role) => {
+    const query = roleSearchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      role.name.toLowerCase().includes(query) ||
+      role.description.toLowerCase().includes(query)
+    );
+  });
+  const selectedRole =
+    roles.find((role) => role.id === selectedRoleId) || roles[0];
+
+  const getModuleAccess = (roleId: string, moduleId: string) =>
+    moduleAccess.find(
+      (access) => access.roleId === roleId && access.moduleId === moduleId,
+    ) || {
+      roleId,
+      moduleId,
+      canView: false,
+      canCreate: false,
+      canEdit: false,
+      canAdmin: false,
+    };
+
+  const getWorkflowAccess = (roleId: string, workflowTypeId: string) =>
+    workflowAccess.find(
+      (access) =>
+        access.roleId === roleId && access.workflowTypeId === workflowTypeId,
+    ) || {
+      roleId,
+      workflowTypeId,
+      canView: false,
+      canCreate: false,
+      canTransition: false,
+      canClose: false,
+      canApprove: false,
+      canViewAnalytics: false,
+    };
+
+  const getObjectScope = (roleId: string) =>
+    objectScopes.find((scope) => scope.roleId === roleId) || {
+      roleId,
+      scopeType: "OWN_ONLY" as ObjectScopeType,
+      regionIds: [],
+      clubIds: [],
+    };
+
+  const getTenantScope = (roleId: string) =>
+    tenantScopes.find((scope) => scope.roleId === roleId) || {
+      roleId,
+      tenantIds: [],
+    };
+
+  const getAdminRights = (roleId: string) =>
+    adminRights.find((rights) => rights.roleId === roleId) || {
+      roleId,
+      canManageUsers: false,
+      canManageRoles: false,
+      canManageWorkflowTypes: false,
+      canManageSLA: false,
+      canManageAutomations: false,
+      canManageIntegrations: false,
+    };
+
+  const updateRole = (
+    roleId: string,
+    patch: Partial<Pick<PermissionRole, "name" | "description" | "active">>,
+  ) => {
+    setRoles((currentRoles) =>
+      currentRoles.map((role) =>
+        role.id === roleId ? { ...role, ...patch } : role,
+      ),
+    );
+  };
+
+  const toggleModuleAccess = (
+    roleId: string,
+    moduleId: string,
+    permission: ModulePermissionKey,
+  ) => {
+    setModuleAccess((currentAccess) => {
+      const existing = currentAccess.find(
+        (access) => access.roleId === roleId && access.moduleId === moduleId,
+      );
+      if (!existing) {
+        return [
+          ...currentAccess,
+          {
+            roleId,
+            moduleId,
+            canView: false,
+            canCreate: false,
+            canEdit: false,
+            canAdmin: false,
+            [permission]: true,
+          },
+        ];
+      }
+
+      return currentAccess.map((access) =>
+        access.roleId === roleId && access.moduleId === moduleId
+          ? { ...access, [permission]: !access[permission] }
+          : access,
+      );
+    });
+  };
+
+  const toggleWorkflowAccess = (
+    roleId: string,
+    workflowTypeId: string,
+    permission: WorkflowPermissionKey,
+  ) => {
+    setWorkflowAccess((currentAccess) => {
+      const existing = currentAccess.find(
+        (access) =>
+          access.roleId === roleId && access.workflowTypeId === workflowTypeId,
+      );
+      if (!existing) {
+        return [
+          ...currentAccess,
+          {
+            roleId,
+            workflowTypeId,
+            canView: false,
+            canCreate: false,
+            canTransition: false,
+            canClose: false,
+            canApprove: false,
+            canViewAnalytics: false,
+            [permission]: true,
+          },
+        ];
+      }
+
+      return currentAccess.map((access) =>
+        access.roleId === roleId && access.workflowTypeId === workflowTypeId
+          ? { ...access, [permission]: !access[permission] }
+          : access,
+      );
+    });
+  };
+
+  const updateObjectScope = (
+    roleId: string,
+    patch: Partial<Omit<ObjectScopePermission, "roleId">>,
+  ) => {
+    setObjectScopes((currentScopes) => {
+      const existing = currentScopes.some((scope) => scope.roleId === roleId);
+      if (!existing) {
+        return [
+          ...currentScopes,
+          {
+            roleId,
+            scopeType: "OWN_ONLY",
+            regionIds: [],
+            clubIds: [],
+            ...patch,
+          },
+        ];
+      }
+
+      return currentScopes.map((scope) =>
+        scope.roleId === roleId ? { ...scope, ...patch } : scope,
+      );
+    });
+  };
+
+  const updateTenantScope = (roleId: string, tenantIds: string[]) => {
+    setTenantScopes((currentScopes) => {
+      const existing = currentScopes.some((scope) => scope.roleId === roleId);
+      if (!existing) return [...currentScopes, { roleId, tenantIds }];
+
+      return currentScopes.map((scope) =>
+        scope.roleId === roleId ? { ...scope, tenantIds } : scope,
+      );
+    });
+  };
+
+  const toggleAdminRight = (roleId: string, permission: AdminRightsKey) => {
+    setAdminRights((currentRights) => {
+      const existing = currentRights.find((rights) => rights.roleId === roleId);
+      if (!existing) {
+        return [
+          ...currentRights,
+          {
+            roleId,
+            canManageUsers: false,
+            canManageRoles: false,
+            canManageWorkflowTypes: false,
+            canManageSLA: false,
+            canManageAutomations: false,
+            canManageIntegrations: false,
+            [permission]: true,
+          },
+        ];
+      }
+
+      return currentRights.map((rights) =>
+        rights.roleId === roleId
+          ? { ...rights, [permission]: !rights[permission] }
+          : rights,
+      );
+    });
+  };
+
+  const parseCsv = (value: string) =>
+    value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  const addRole = () => {
+    const roleName = newRoleName.trim();
+    if (!roleName) return;
+
+    const roleId = generateUniqueId("role");
+    const newRole: PermissionRole = {
+      id: roleId,
+      name: roleName,
+      description: newRoleDescription.trim(),
+      active: true,
+      systemRole: false,
+    };
+
+    setRoles((currentRoles) => [...currentRoles, newRole]);
+    setModuleAccess((currentAccess) => [
+      ...currentAccess,
+      ...visibleModules.map((module) => ({
+        roleId,
+        moduleId: module.moduleId,
+        canView: false,
+        canCreate: false,
+        canEdit: false,
+        canAdmin: false,
+      })),
+    ]);
+    setWorkflowAccess((currentAccess) => [
+      ...currentAccess,
+      ...activeWorkflows.map((workflow) => ({
+        roleId,
+        workflowTypeId: workflow.id,
+        canView: false,
+        canCreate: false,
+        canTransition: false,
+        canClose: false,
+        canApprove: false,
+        canViewAnalytics: false,
+      })),
+    ]);
+    setObjectScopes((currentScopes) => [
+      ...currentScopes,
+      { roleId, scopeType: "OWN_ONLY", regionIds: [], clubIds: [] },
+    ]);
+    setTenantScopes((currentScopes) => [
+      ...currentScopes,
+      { roleId, tenantIds: ["tenant-main"] },
+    ]);
+    setAdminRights((currentRights) => [
+      ...currentRights,
+      {
+        roleId,
+        canManageUsers: false,
+        canManageRoles: false,
+        canManageWorkflowTypes: false,
+        canManageSLA: false,
+        canManageAutomations: false,
+        canManageIntegrations: false,
+      },
+    ]);
+    setNewRoleName("");
+    setNewRoleDescription("");
+    setSelectedRoleId(roleId);
+    setActivePermissionsTab("roles");
+  };
+
+  return (
+    <div className="h-full overflow-y-auto bg-white p-6 md:p-8">
+      <div className="max-w-7xl space-y-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Organization
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-slate-950">
+              Roles & Permissions
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Permissions engine placeholder. Full implementation later.
+            </p>
+          </div>
+          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+            {(
+              canViewMigrationCheck
+                ? (["roles", "migration"] as const)
+                : (["roles"] as const)
+            ).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActivePermissionsTab(tab)}
+                className={cn(
+                  "rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
+                  activePermissionsTab === tab
+                    ? "bg-white text-slate-950 shadow-sm"
+                    : "text-slate-500 hover:text-slate-800",
+                )}
+              >
+                {tab === "roles" ? "Roles" : "Migration Check"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activePermissionsTab === "roles" ? (
+          <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+            <aside className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
+              <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                <Search size={15} className="text-slate-400" />
+                <input
+                  value={roleSearchQuery}
+                  onChange={(event) => setRoleSearchQuery(event.target.value)}
+                  placeholder="Search roles"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                />
+              </div>
+
+              <div className="mt-4 grid gap-2">
+                {filteredRoles.map((role) => (
+                  <button
+                    key={role.id}
+                    onClick={() => setSelectedRoleId(role.id)}
+                    className={cn(
+                      "rounded-2xl border p-3 text-left transition-colors",
+                      selectedRole?.id === role.id
+                        ? "border-slate-300 bg-white shadow-sm"
+                        : "border-transparent hover:bg-white/80",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {role.name}
+                      </p>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-bold",
+                          role.active
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-slate-200 text-slate-500",
+                        )}
+                      >
+                        {role.active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-slate-500">
+                      {role.description || "No description"}
+                    </p>
+                    <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      {role.systemRole ? "System role" : "Custom role"}
+                    </p>
+                  </button>
+                ))}
+                {!filteredRoles.length && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                    No roles found.
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Create role
+                </p>
+                <div className="mt-3 space-y-2">
+                  <input
+                    value={newRoleName}
+                    onChange={(event) => setNewRoleName(event.target.value)}
+                    placeholder="Role name"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                  />
+                  <input
+                    value={newRoleDescription}
+                    onChange={(event) =>
+                      setNewRoleDescription(event.target.value)
+                    }
+                    placeholder="Description"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                  />
+                  <button
+                    onClick={addRole}
+                    disabled={!newRoleName.trim()}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    <Plus size={15} />
+                    Create role
+                  </button>
+                </div>
+              </div>
+            </aside>
+
+            <main className="min-w-0 space-y-5">
+              {selectedRole ? (
+                <>
+                  <section className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <div className="grid gap-4 lg:grid-cols-[1fr_1.5fr_auto] lg:items-end">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Role
+                        </label>
+                        <input
+                          value={selectedRole.name}
+                          onChange={(event) =>
+                            updateRole(selectedRole.id, {
+                              name: event.target.value,
+                            })
+                          }
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          Description
+                        </label>
+                        <input
+                          value={selectedRole.description}
+                          onChange={(event) =>
+                            updateRole(selectedRole.id, {
+                              description: event.target.value,
+                            })
+                          }
+                          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-400"
+                        />
+                      </div>
+                      <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={selectedRole.active}
+                          onChange={(event) =>
+                            updateRole(selectedRole.id, {
+                              active: event.target.checked,
+                            })
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Active
+                      </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                        {selectedRole.systemRole ? "System" : "Custom"}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
+                        ID: {selectedRole.id}
+                      </span>
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-slate-200 bg-white">
+                    <div className="border-b border-slate-100 p-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Module Access
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Module-level view, create, edit and admin flags for the
+                        selected role only.
+                      </p>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {visibleModules.map((module) => {
+                        const access = getModuleAccess(
+                          selectedRole.id,
+                          module.moduleId,
+                        );
+                        return (
+                          <div
+                            key={module.moduleId}
+                            className="grid gap-3 p-4 lg:grid-cols-[220px_1fr] lg:items-center"
+                          >
+                            <p className="text-sm font-semibold text-slate-900">
+                              {module.title}
+                            </p>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                              {modulePermissionKeys.map((permission) => (
+                                <label
+                                  key={permission.key}
+                                  className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={access[permission.key]}
+                                    onChange={() =>
+                                      toggleModuleAccess(
+                                        selectedRole.id,
+                                        module.moduleId,
+                                        permission.key,
+                                      )
+                                    }
+                                    className="h-3.5 w-3.5 rounded border-slate-300"
+                                  />
+                                  {permission.label}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="rounded-3xl border border-slate-200 bg-white">
+                    <div className="border-b border-slate-100 p-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Workflow Access
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Workflow-aware preview permissions for future
+                        visibility, transition and analytics access.
+                      </p>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {activeWorkflows.map((workflow) => {
+                        const access = getWorkflowAccess(
+                          selectedRole.id,
+                          workflow.id,
+                        );
+                        return (
+                          <div
+                            key={workflow.id}
+                            className="grid gap-3 p-4 xl:grid-cols-[220px_1fr] xl:items-center"
+                          >
+                            <p className="text-sm font-semibold text-slate-900">
+                              {workflow.label || workflow.name}
+                            </p>
+                            <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+                              {workflowPermissionKeys.map((permission) => (
+                                <label
+                                  key={permission.key}
+                                  className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={access[permission.key]}
+                                    onChange={() =>
+                                      toggleWorkflowAccess(
+                                        selectedRole.id,
+                                        workflow.id,
+                                        permission.key,
+                                      )
+                                    }
+                                    className="h-3.5 w-3.5 rounded border-slate-300"
+                                  />
+                                  {permission.label}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <div className="grid gap-5 xl:grid-cols-2">
+                    <section className="rounded-3xl border border-slate-200 bg-white">
+                      <div className="border-b border-slate-100 p-4">
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Scope
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Region, club and own-only object boundaries for the
+                          selected role.
+                        </p>
+                      </div>
+                      <div className="space-y-3 p-4">
+                        {(() => {
+                          const scope = getObjectScope(selectedRole.id);
+                          return (
+                            <>
+                              <select
+                                value={scope.scopeType}
+                                onChange={(event) =>
+                                  updateObjectScope(selectedRole.id, {
+                                    scopeType:
+                                      event.target.value as ObjectScopeType,
+                                  })
+                                }
+                                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                              >
+                                <option value="ALL">ALL</option>
+                                <option value="REGION">REGION</option>
+                                <option value="CLUBS">CLUBS</option>
+                                <option value="OWN_ONLY">OWN_ONLY</option>
+                              </select>
+                              <input
+                                value={scope.regionIds.join(", ")}
+                                onChange={(event) =>
+                                  updateObjectScope(selectedRole.id, {
+                                    regionIds: parseCsv(event.target.value),
+                                  })
+                                }
+                                placeholder="regionIds"
+                                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                              />
+                              <input
+                                value={scope.clubIds.join(", ")}
+                                onChange={(event) =>
+                                  updateObjectScope(selectedRole.id, {
+                                    clubIds: parseCsv(event.target.value),
+                                  })
+                                }
+                                placeholder="clubIds"
+                                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                              />
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </section>
+
+                    <section className="rounded-3xl border border-slate-200 bg-white">
+                      <div className="border-b border-slate-100 p-4">
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Tenant Scope
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Mock tenant IDs for future franchise, multi-brand and
+                          HQ access.
+                        </p>
+                      </div>
+                      <div className="p-4">
+                        <input
+                          value={getTenantScope(selectedRole.id).tenantIds.join(
+                            ", ",
+                          )}
+                          onChange={(event) =>
+                            updateTenantScope(
+                              selectedRole.id,
+                              parseCsv(event.target.value),
+                            )
+                          }
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                        />
+                      </div>
+                    </section>
+                  </div>
+
+                  <section className="rounded-3xl border border-slate-200 bg-white">
+                    <div className="border-b border-slate-100 p-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Admin Rights
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Future administrative capabilities. These toggles do not
+                        affect current permissions.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                      {adminRightsKeys.map((permission) => {
+                        const rights = getAdminRights(selectedRole.id);
+                        return (
+                          <label
+                            key={permission.key}
+                            className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={rights[permission.key]}
+                              onChange={() =>
+                                toggleAdminRight(
+                                  selectedRole.id,
+                                  permission.key,
+                                )
+                              }
+                              className="h-3.5 w-3.5 rounded border-slate-300"
+                            />
+                            {permission.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </section>
+                </>
+              ) : (
+                <section className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                  Create a role to manage permissions.
+                </section>
+              )}
+            </main>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <section className="rounded-3xl border border-slate-200 bg-white p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+                    Internal diagnostics
+                  </p>
+                  <h3 className="mt-2 text-xl font-bold text-slate-950">
+                    Migration Check
+                  </h3>
+                  <p className="mt-2 max-w-2xl text-sm text-slate-500">
+                    Compares legacy permissions with resolver-based previews.
+                    This panel is diagnostics-only and does not change access.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="inline-flex w-fit items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                    Enforcement: OFF
+                  </span>
+                  <span className="inline-flex w-fit items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                    Workflow visibility enforced
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Module mismatches
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-slate-950">
+                    {shadowModeMismatches.length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Workflow mismatches
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-slate-950">
+                    {workflowShadowMismatches.length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Legacy fallback count
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-slate-950">
+                    {workflowLegacyFallbackCount}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Enforcement status
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-slate-950">
+                    OFF
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowMigrationDetails((current) => !current)}
+                className="mt-5 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {showMigrationDetails
+                  ? "Slėpti detales"
+                  : "Peržiūrėti detales"}
+              </button>
+            </section>
+
+            {showMigrationDetails && (
+              <div className="space-y-6">
+                <section className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70">
+                  <div className="border-b border-slate-200/70 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Module Migration Details
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Legacy module visibility compared with resolver
+                          preview. Enforcement remains off.
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-bold",
+                          shadowModeMismatches.length
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-emerald-100 text-emerald-700",
+                        )}
+                      >
+                        {shadowModeMismatches.length
+                          ? `${shadowModeMismatches.length} mismatch`
+                          : "No mismatches"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[760px] text-left text-sm">
+                      <thead className="bg-white/60 text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">User</th>
+                          <th className="px-4 py-3 font-semibold">Surface</th>
+                          <th className="px-4 py-3 font-semibold">Target</th>
+                          <th className="px-4 py-3 font-semibold">Legacy</th>
+                          <th className="px-4 py-3 font-semibold">Resolver</th>
+                          <th className="px-4 py-3 font-semibold">Mode</th>
+                          <th className="px-4 py-3 font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(shadowModeMismatches.length
+                          ? shadowModeMismatches
+                          : shadowModeComparisons.slice(0, 12)
+                        ).map((comparison) => (
+                          <tr
+                            key={`${comparison.userId}-${comparison.surface}-${comparison.targetId}`}
+                          >
+                            <td className="px-4 py-3 font-semibold text-slate-900">
+                              {comparison.userName}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.surface}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.targetLabel}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.legacyAllowed ? "Allowed" : "Denied"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.resolverAllowed
+                                ? "Allowed"
+                                : "Denied"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.resolverEnforced
+                                ? "Resolver enforced"
+                                : "Shadow only"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-1 text-xs font-bold",
+                                  comparison.mismatch
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-slate-100 text-slate-500",
+                                )}
+                              >
+                                {comparison.mismatch ? "Mismatch" : "Match"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70">
+                  <div className="border-b border-slate-200/70 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Workflow Migration Details
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Current workflow.allowedRoles visibility compared
+                          with resolver workflow canView preview.
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-bold",
+                          workflowShadowMismatches.length
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-emerald-100 text-emerald-700",
+                        )}
+                      >
+                        {workflowShadowMismatches.length
+                          ? `${workflowShadowMismatches.length} mismatch`
+                          : "No mismatches"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[860px] text-left text-sm">
+                      <thead className="bg-white/60 text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">User</th>
+                          <th className="px-4 py-3 font-semibold">Workflow</th>
+                          <th className="px-4 py-3 font-semibold">Surface</th>
+                          <th className="px-4 py-3 font-semibold">Legacy</th>
+                          <th className="px-4 py-3 font-semibold">Resolver</th>
+                          <th className="px-4 py-3 font-semibold">
+                            Effective roles
+                          </th>
+                          <th className="px-4 py-3 font-semibold">Fallback</th>
+                          <th className="px-4 py-3 font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(workflowShadowMismatches.length
+                          ? workflowShadowMismatches
+                          : workflowShadowComparisons.slice(0, 18)
+                        ).map((comparison) => (
+                          <tr
+                            key={`${comparison.userId}-${comparison.surface}-${comparison.workflowTypeId}`}
+                          >
+                            <td className="px-4 py-3 font-semibold text-slate-900">
+                              {comparison.userName}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.workflowName}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.surface}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.legacyAllowed ? "Visible" : "Hidden"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.resolverAllowed
+                                ? "Visible"
+                                : "Hidden"}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.effectiveRoleNames.join(", ") || "-"}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.resolverDataMissing
+                                ? "Legacy fallback"
+                                : "Resolver data"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-1 text-xs font-bold",
+                                  comparison.mismatch
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-slate-100 text-slate-500",
+                                )}
+                              >
+                                {comparison.mismatch ? "Mismatch" : "Match"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white">
+                  <div className="border-b border-slate-100 p-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                      Hydrated session role preview
+                    </h4>
+                  </div>
+                  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+                    {users.map((user) => {
+                      const rolePreview = getHydratedRolePreview(user);
+                      return (
+                        <div
+                          key={user.id}
+                          className="rounded-xl border border-slate-200 bg-white p-3"
+                        >
+                          <p className="text-sm font-semibold text-slate-900">
+                            {user.name}
+                          </p>
+                          <div className="mt-2 space-y-1 text-xs text-slate-500">
+                            <p>Legacy role: {user.role}</p>
+                            <p>
+                              Assigned additive roles:{" "}
+                              {rolePreview.assignedRoles || "-"}
+                            </p>
+                            <p>
+                              Hydrated effective roles:{" "}
+                              {rolePreview.effectiveRoles || "-"}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AdminModal({
   title,
@@ -1279,14 +2569,19 @@ function UsersAdmin({
   users,
   setUsers,
   clubs,
+  permissionRoles,
+  permissionsConfig,
 }: {
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   clubs: Club[];
+  permissionRoles: PermissionRole[];
+  permissionsConfig: PermissionPreviewConfig;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<User>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [permissionsUser, setPermissionsUser] = useState<User | null>(null);
 
   const ROLES = [
     "SUPER_ADMIN",
@@ -1298,16 +2593,39 @@ function UsersAdmin({
     "EXTERNAL",
   ];
 
+  const isPendingAccessUser = (user: User) =>
+    user.id.startsWith("pending-") && user.is_active === false;
+  // Preview-only additive role resolver. Enforcement not enabled yet.
+  const getPreview = (user: Partial<User>) =>
+    resolveEffectivePermissionPreview(user, permissionsConfig);
+  const getAssignedRoleIds = (user: Partial<User>) =>
+    resolveUserAssignedRoles(user, permissionRoles).map((role) => role.id);
+  const getAssignedPermissionRoles = (user: Partial<User>) =>
+    resolveUserAssignedRoles(user, permissionRoles);
+  const getRoleIdByName = (roleName?: string) =>
+    resolveUserAssignedRoles({ role: roleName as User["role"] }, permissionRoles)[0]
+      ?.id;
+  const toggleAssignedRole = (roleId: string) => {
+    const currentRoleIds = getAssignedRoleIds(editing);
+    const nextRoleIds = currentRoleIds.includes(roleId)
+      ? currentRoleIds.filter((id) => id !== roleId)
+      : [...currentRoleIds, roleId];
+
+    setEditing({ ...editing, assignedRoleIds: nextRoleIds });
+  };
   const filteredUsers = users.filter((user) => {
     const query = searchQuery.toLowerCase();
+    const assignedRoleText = getAssignedPermissionRoles(user)
+      .map((role) => role.name)
+      .join(" ")
+      .toLowerCase();
     return (
       user.name.toLowerCase().includes(query) ||
       (user.email || "").toLowerCase().includes(query) ||
-      user.role.toLowerCase().includes(query)
+      user.role.toLowerCase().includes(query) ||
+      assignedRoleText.includes(query)
     );
   });
-  const isPendingAccessUser = (user: User) =>
-    user.id.startsWith("pending-") && user.is_active === false;
 
   const handleSave = () => {
     const normalizedEmail = editing.email?.trim().toLowerCase();
@@ -1323,6 +2641,10 @@ function UsersAdmin({
     }
 
     const normalizedRole = (editing.role || "OPS").toUpperCase() as User["role"];
+    const assignedRoleIds = getAssignedRoleIds({
+      ...editing,
+      role: normalizedRole,
+    });
     const duplicateEmail = users.find(
       (user) =>
         user.id !== editing.id &&
@@ -1345,6 +2667,7 @@ function UsersAdmin({
                   ...editing,
                   email: normalizedEmail,
                   role: normalizedRole,
+                  assignedRoleIds,
                 } as User)
               : c,
           ),
@@ -1371,6 +2694,7 @@ function UsersAdmin({
           name: editing.name.trim(),
           email: normalizedEmail,
           role: normalizedRole,
+          assignedRoleIds,
           is_active: editing.is_active !== false,
           assigned_clubs: editing.assigned_clubs || [],
         } as User;
@@ -1431,6 +2755,9 @@ function UsersAdmin({
               id: Date.now().toString(),
               is_active: true,
               role: "OPS",
+              assignedRoleIds: getRoleIdByName("OPS")
+                ? [getRoleIdByName("OPS") as string]
+                : [],
               assigned_clubs: [],
             });
             setModalOpen(true);
@@ -1446,15 +2773,16 @@ function UsersAdmin({
             <tr className="border-b border-slate-200 text-slate-500 text-sm">
               <th className="pb-3 font-medium">Vardas</th>
               <th className="pb-3 font-medium">El. pastas</th>
-              <th className="pb-3 font-medium">Rolė</th>
-              <th className="pb-3 font-medium">Priskirti klubai</th>
+              <th className="pb-3 font-medium">Priskirtos rolės</th>
+              <th className="pb-3 font-medium">Scope</th>
+              <th className="pb-3 font-medium">Tenant / Organizacija</th>
               <th className="pb-3 font-medium">Statusas</th>
               <th className="pb-3 font-medium text-right">Veiksmai</th>
             </tr>
           </thead>
           <tbody>
             {filteredUsers.length > 0 ? (
-              filteredUsers.map((user, index) => (
+              filteredUsers.map((user) => (
                 <tr
                   key={user.id}
                   className="border-b border-slate-100 hover:bg-slate-50"
@@ -1462,9 +2790,22 @@ function UsersAdmin({
                   <td className="py-4 font-semibold">{user.name}</td>
                   <td className="py-4 text-xs text-slate-500">{user.email}</td>
                   <td className="py-4">
-                    <span className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
-                      {user.role}
-                    </span>
+                    <div className="flex max-w-[220px] flex-wrap gap-1.5">
+                      {getAssignedPermissionRoles(user).length ? (
+                        getAssignedPermissionRoles(user).map((role) => (
+                          <span
+                            key={role.id}
+                            className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600"
+                          >
+                            {role.name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
+                          {user.role}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-4 text-xs text-slate-500 max-w-[200px] truncate">
                     {user.assigned_clubs?.length
@@ -1475,14 +2816,17 @@ function UsersAdmin({
                           .join(", ")
                       : "-"}
                   </td>
+                  <td className="py-4 text-xs text-slate-500">
+                    {getPreview(user).tenantScopeLabel}
+                  </td>
                   <td className="py-4">
                     <span
-                      className={`px-2 py-1 rounded-md text-xs font-bold uppercase ${
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase ${
                         user.is_active !== false
-                          ? "bg-green-100 text-green-700"
+                          ? "bg-emerald-50 text-emerald-700"
                           : isPendingAccessUser(user)
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-red-100 text-red-700"
+                            ? "bg-amber-50 text-amber-700"
+                            : "bg-rose-50 text-rose-700"
                       }`}
                     >
                       {user.is_active !== false
@@ -1493,6 +2837,13 @@ function UsersAdmin({
                     </span>
                   </td>
                   <td className="py-4 flex justify-end gap-2">
+                    <button
+                      onClick={() => setPermissionsUser(user)}
+                      className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
+                      title="Valdyti teises"
+                    >
+                      <ShieldCheck size={16} />
+                    </button>
                     <button
                       onClick={() => {
                         setEditing(user);
@@ -1526,7 +2877,7 @@ function UsersAdmin({
             ) : (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="py-8 text-center text-slate-500 font-medium"
                 >
                   Nerasta rezultatų
@@ -1547,17 +2898,30 @@ function UsersAdmin({
               <div>
                 <h3 className="font-bold text-slate-900">{user.name}</h3>
                 <p className="text-xs text-slate-500 mt-0.5">{user.email}</p>
-                <span className="inline-block mt-1 px-2 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-600">
-                  {user.role}
-                </span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {getAssignedPermissionRoles(user).length ? (
+                    getAssignedPermissionRoles(user).map((role) => (
+                      <span
+                        key={role.id}
+                        className="inline-block px-2 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-600"
+                      >
+                        {role.name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="inline-block px-2 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-600">
+                      {user.role}
+                    </span>
+                  )}
+                </div>
               </div>
               <span
-                className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
                   user.is_active !== false
-                    ? "bg-green-100 text-green-700"
+                    ? "bg-emerald-50 text-emerald-700"
                     : isPendingAccessUser(user)
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-red-100 text-red-700"
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-rose-50 text-rose-700"
                 }`}
               >
                 {user.is_active !== false
@@ -1570,7 +2934,7 @@ function UsersAdmin({
 
             <div className="text-xs text-slate-500">
               <span className="font-bold text-slate-400 uppercase mr-1">
-                Klubai:
+                Scope:
               </span>
               {user.assigned_clubs?.length
                 ? user.assigned_clubs
@@ -1578,8 +2942,21 @@ function UsersAdmin({
                     .join(", ")
                 : "-"}
             </div>
+            <div className="text-xs text-slate-500">
+              <span className="font-bold text-slate-400 uppercase mr-1">
+                Tenant / Organizacija:
+              </span>
+              {getPreview(user).tenantScopeLabel}
+            </div>
 
             <div className="flex gap-2 pt-2 border-t border-slate-50">
+              <button
+                onClick={() => setPermissionsUser(user)}
+                className="px-3 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
+                title="Valdyti teises"
+              >
+                <ShieldCheck size={14} />
+              </button>
               <button
                 onClick={() => {
                   setEditing(user);
@@ -1663,13 +3040,23 @@ function UsersAdmin({
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-              Rolė
+              Pagrindinė rolė (legacy)
             </label>
             <select
               value={editing.role || "OPS"}
-              onChange={(e) =>
-                setEditing({ ...editing, role: e.target.value as any })
-              }
+              onChange={(e) => {
+                const nextRole = e.target.value as User["role"];
+                const nextRoleId = getRoleIdByName(nextRole);
+                const currentAssignedRoleIds = getAssignedRoleIds(editing);
+                setEditing({
+                  ...editing,
+                  role: nextRole,
+                  assignedRoleIds:
+                    nextRoleId && !currentAssignedRoleIds.includes(nextRoleId)
+                      ? [...currentAssignedRoleIds, nextRoleId]
+                      : currentAssignedRoleIds,
+                });
+              }}
               className="w-full p-2 border border-slate-200 rounded-lg"
             >
               {ROLES.map((r, index) => (
@@ -1678,6 +3065,39 @@ function UsersAdmin({
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+              Priskirtos rolės
+            </label>
+            <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1 bg-slate-50">
+              {permissionRoles.map((role) => (
+                <label
+                  key={role.id}
+                  className="flex items-start gap-2 p-2 hover:bg-slate-100 rounded cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={getAssignedRoleIds(editing).includes(role.id)}
+                    onChange={() => toggleAssignedRole(role.id)}
+                    className="mt-0.5 w-4 h-4 text-brand-lime rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-700">
+                      {role.name}
+                    </span>
+                    <span className="block text-xs text-slate-400">
+                      {role.description || "No description"}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              {permissionRoles.length === 0 && (
+                <span className="text-xs text-slate-400 p-2">
+                  Roles & Permissions source has no roles yet.
+                </span>
+              )}
+            </div>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
@@ -1705,12 +3125,62 @@ function UsersAdmin({
               )}
             </div>
           </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h4 className="text-sm font-bold text-slate-900">
+              Effective access preview
+            </h4>
+            <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-3">
+              <div>
+                <p className="font-bold uppercase text-slate-400">
+                  Assigned Roles
+                </p>
+                <p className="mt-1">
+                  {getAssignedPermissionRoles(editing)
+                    .map((role) => role.name)
+                    .join(", ") || "-"}
+                </p>
+              </div>
+              <div>
+                <p className="font-bold uppercase text-slate-400">Tenant</p>
+                <p className="mt-1">{getPreview(editing).tenantScopeLabel}</p>
+              </div>
+              <div>
+                <p className="font-bold uppercase text-slate-400">Scope</p>
+                <p className="mt-1">{getPreview(editing).scopeLabel}</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs font-medium text-slate-400">
+              Permissions enforcement coming later.
+            </p>
+          </div>
           <button
             onClick={handleSave}
             className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold mt-4"
             disabled={!editing.name || !editing.id}
           >
             Išsaugoti
+          </button>
+        </div>
+      </AdminModal>
+      <AdminModal
+        title="Valdyti teises"
+        isOpen={Boolean(permissionsUser)}
+        onClose={() => setPermissionsUser(null)}
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-bold text-slate-900">
+              {permissionsUser?.name}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Permissions management placeholder. Full implementation later.
+            </p>
+          </div>
+          <button
+            onClick={() => setPermissionsUser(null)}
+            className="w-full py-3 bg-slate-950 text-white rounded-xl font-bold"
+          >
+            Uždaryti
           </button>
         </div>
       </AdminModal>

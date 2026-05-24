@@ -34,6 +34,12 @@ export interface WorkflowFieldConfig {
 
 export interface WorkflowType {
   id: string;
+  moduleId?: string;
+  label?: string;
+  active?: boolean;
+  order?: number;
+  permissionKey?: string;
+  submoduleKey?: string;
   legacyCategory: string;
   action: "fault" | "order" | "other";
   name: string;
@@ -129,6 +135,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "facility-work",
+    moduleId: "darbai",
+    label: "Patalpų darbai",
+    active: true,
+    order: 10,
     legacyCategory: "FACILITY_FAULT",
     action: "fault",
     name: "Patalpų darbai",
@@ -150,6 +160,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "equipment-work",
+    moduleId: "darbai",
+    label: "Treniruoklių darbai",
+    active: true,
+    order: 20,
     legacyCategory: "EQUIPMENT_FAULT",
     action: "fault",
     name: "Treniruoklių darbai",
@@ -171,6 +185,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "it-work",
+    moduleId: "darbai",
+    label: "IT darbai",
+    active: true,
+    order: 30,
     legacyCategory: "IT",
     action: "other",
     name: "IT darbai",
@@ -190,6 +208,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "marketing-work",
+    moduleId: "darbai",
+    label: "Marketing darbai",
+    active: true,
+    order: 40,
     legacyCategory: "MARKETING",
     action: "other",
     name: "Marketing darbai",
@@ -209,6 +231,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "sop-work",
+    moduleId: "darbai",
+    label: "SOP darbai",
+    active: true,
+    order: 50,
     legacyCategory: "SOP",
     action: "other",
     name: "SOP darbai",
@@ -227,6 +253,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "video-control",
+    moduleId: "kontrole",
+    label: "Vaizdo kontrolė",
+    active: true,
+    order: 60,
     legacyCategory: "VIDEO_CONTROL",
     action: "other",
     name: "Vaizdo kontrolė",
@@ -246,6 +276,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "orders",
+    moduleId: "orders",
+    label: "Užsakymai",
+    active: true,
+    order: 70,
     legacyCategory: "ORDER",
     action: "order",
     name: "Užsakymai",
@@ -266,6 +300,10 @@ export const workflowTypes: WorkflowType[] = [
   {
     ...baseWorkflow,
     id: "suggestions",
+    moduleId: "idejos",
+    label: "Pasiūlymai",
+    active: true,
+    order: 80,
     legacyCategory: "OTHER",
     action: "other",
     name: "Pasiūlymai",

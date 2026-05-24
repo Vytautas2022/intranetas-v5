@@ -5,9 +5,8 @@ import {
 } from "../../modules/moduleRegistry";
 import {
   canAccessPermission,
-  canSeeSidebarModule,
-  canSeeSubmodule,
 } from "../../logic/permissionEngine";
+import { canSeeSidebarModuleResolver } from "../../logic/permissionPreviewResolver";
 
 export interface SidebarItem {
   type?: "header" | "group";
@@ -26,6 +25,7 @@ export interface SidebarSubModule {
   label: string;
   icon: any;
   module: string;
+  hidden?: boolean;
 }
 
 export const hasModulePermission = (
@@ -52,7 +52,7 @@ export const getFilteredSidebarItems = (
   sidebarItems: SidebarItem[],
 ) => {
   return sidebarItems.filter((item) =>
-    canSeeSidebarModule(currentUser, item.module, item.hidden),
+    canSeeSidebarModuleResolver(currentUser, item.module, item.hidden),
   );
 };
 
@@ -65,14 +65,11 @@ export const getSidebarSubModules = (
       label: module.title,
       icon: module.icon,
       module: String(module.permissionKey || module.moduleId),
+      hidden: module.sidebarVisibility === "hidden",
     }))
     .filter(
       (tab) =>
-        canSeeSubmodule(
-          currentUser,
-          tab.module,
-          (tab as any).role,
-        ),
+        canSeeSidebarModuleResolver(currentUser, tab.module, tab.hidden),
     );
 
 export const getActiveSubmodule = (

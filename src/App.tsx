@@ -158,6 +158,7 @@ import {
 
 import { cn } from "./lib/utils";
 import { HomeActionModal } from "./components/HomeActionModal";
+import { WorkflowSelector } from "./components/WorkflowSelector";
 import { WaitingForPartsModal } from "./components/WaitingForPartsModal";
 import { SopDecisionModal } from "./components/SopDecisionModal";
 import { InsightModal } from "./components/InsightModal";
@@ -198,13 +199,13 @@ import { EquipmentSearchModal } from "./components/EquipmentSearchModal";
 import {
   workflowTypes as initialWorkflowTypes,
   getWorkflowTypeByLegacyCategory,
-  getWorkflowTypeById,
   WorkflowType,
 } from "./mock-db/workflowTypes";
 import {
   applyWorkflowMigration,
   filterBoardEntities,
   getActiveDarbaiWorkflowIds,
+  getActiveWorkflowTypesForModule,
   getBoardKanbanLanes,
   getScopedEntities,
   hasUnmappedWorkflowStatuses,
@@ -3889,6 +3890,9 @@ function MainApp() {
   >("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
   const [typeFilters, setTypeFilters] = useState<string[]>([]);
+  const [selectedWorkflowTypeIds, setSelectedWorkflowTypeIds] = useState<
+    string[]
+  >([]);
   const [regStep, setRegStep] = useState<2 | 3>(2);
   const [regType, setRegType] = useState<string>("Darbas");
   const [activeModal, setActiveModal] = useState<
@@ -5817,6 +5821,26 @@ ${task.updatedBy}
     [scopedEntities],
   );
 
+  const visibleWorkflowTypes = useMemo(
+    () => getActiveWorkflowTypesForModule(workflowTypes, "darbai", currentUser),
+    [workflowTypes, currentUser],
+  );
+
+  const visibleWorkflowTypeIds = useMemo(
+    () => visibleWorkflowTypes.map((workflow) => workflow.id),
+    [visibleWorkflowTypes],
+  );
+
+  useEffect(() => {
+    setSelectedWorkflowTypeIds((previous) =>
+      previous.filter((workflowTypeId) =>
+        visibleWorkflowTypeIds.includes(workflowTypeId),
+      ),
+    );
+  }, [visibleWorkflowTypeIds]);
+
+  const permittedWorkflowTypeIds = visibleWorkflowTypeIds;
+
   const filteredEntities = useMemo(
     () =>
       filterBoardEntities({
@@ -5834,6 +5858,8 @@ ${task.updatedBy}
         quickFilter,
         periodicFilter,
         clubFilter,
+        selectedWorkflowTypeIds,
+        permittedWorkflowTypeIds,
       }),
     [
       scopedEntities,
@@ -5848,13 +5874,21 @@ ${task.updatedBy}
       quickFilter,
       periodicFilter,
       clubFilter,
+      selectedWorkflowTypeIds,
+      permittedWorkflowTypeIds,
     ],
   );
 
   const canViewSomedayLane = canManagePeriodicTasks(currentUser);
   const activeWorkflowIds = useMemo(
-    () => getActiveDarbaiWorkflowIds(workflowTypes, typeFilters),
-    [workflowTypes, typeFilters],
+    () =>
+      getActiveDarbaiWorkflowIds(
+        workflowTypes,
+        typeFilters,
+        selectedWorkflowTypeIds,
+        currentUser,
+      ),
+    [workflowTypes, typeFilters, selectedWorkflowTypeIds, currentUser],
   );
   const hasUnmappedStatuses = useMemo(
     () => hasUnmappedWorkflowStatuses(filteredEntities),
@@ -5985,7 +6019,7 @@ ${task.updatedBy}
         )}
 
         {/* Global Header */}
-        <header className="bg-white border-b border-slate-200 h-16 shrink-0 flex items-center justify-between px-4 lg:px-8 z-40">
+        <header className="relative z-[80] bg-white border-b border-slate-200 h-16 shrink-0 flex items-center justify-between px-4 lg:px-8">
           <div className="flex items-center gap-4">
             <button
               onClick={() => setIsSidebarOpen(true)}
@@ -5999,7 +6033,22 @@ ${task.updatedBy}
                 {sidebarTitle}
               </h1>
 
-              {activeModule === "darbai" && activeSubmodule && (
+              {activeModule === "darbai" && activeTab === "kanban" && (
+                <WorkflowSelector
+                  workflows={visibleWorkflowTypes}
+                  selectedWorkflowTypeIds={selectedWorkflowTypeIds}
+                  onChange={(workflowTypeIds) => {
+                    const allowedWorkflowIds = new Set(visibleWorkflowTypeIds);
+                    setSelectedWorkflowTypeIds(
+                      workflowTypeIds.filter((workflowTypeId) =>
+                        allowedWorkflowIds.has(workflowTypeId),
+                      ),
+                    );
+                  }}
+                />
+              )}
+
+              {activeModule === "darbai" && activeSubmodule && activeTab !== "kanban" && (
                 <>
                   <div className="w-px h-6 bg-slate-200 mx-2 hidden lg:block" />
 
@@ -7215,11 +7264,19 @@ ${task.updatedBy}
           <HomeActionModal
             isOpen={activeModal === "home"}
             onClose={() => setActiveModal(null)}
-            workflows={workflowTypes}
+            workflows={visibleWorkflowTypes}
+            currentUser={currentUser}
             onSelectAction={(action, subType, workflowTypeId) => {
               const workflow =
-                getWorkflowTypeById(workflowTypeId) ||
-                getWorkflowTypeByLegacyCategory(subType);
+                visibleWorkflowTypes.find(
+                  (visibleWorkflow) => visibleWorkflow.id === workflowTypeId,
+                ) ||
+                visibleWorkflowTypes.find(
+                  (visibleWorkflow) =>
+                    visibleWorkflow.legacyCategory === subType,
+                );
+              if (!workflow) return;
+
               resetRegForm();
               setRegForm((prev) => ({
                 ...prev,

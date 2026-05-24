@@ -1,3 +1,5 @@
+import type { Checklist } from "./checklists";
+
 /**
  * Shared types for operational entities.
  */
@@ -67,4 +69,5 @@ export interface BaseOperationalEntity {
   history?: HistoryItem[];
   comments?: CommentItem[];
   attachments?: Attachment[];
+  checklists?: Checklist[];
 }

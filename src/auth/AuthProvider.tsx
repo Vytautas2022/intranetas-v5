@@ -8,6 +8,10 @@ import {
   getDefaultModulePermissions,
   normalizePermissionRole,
 } from "../logic/permissionEngine";
+import {
+  defaultPermissionPreviewConfig,
+  resolveEffectivePermissionPreview,
+} from "../logic/permissionPreviewResolver";
 import { readMockStorage, writeMockStorage } from "../logic/mockDbHydration";
 
 const AUTH_STORAGE_KEY = "sg_auth_user_id";
@@ -17,6 +21,7 @@ const DEFAULT_GOOGLE_ROLE: User["role"] = "EXTERNAL";
 
 const normalizeEmail = (email?: string) => email?.trim().toLowerCase() ?? "";
 const normalizeRole = normalizePermissionRole;
+const getEmailLocalPart = (email?: string) => normalizeEmail(email).split("@")[0];
 const getGoogleUserId = (email: string) =>
   `google-${email.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
 const getEmailDomain = (email: string) => email.split("@")[1] ?? "";
@@ -35,6 +40,27 @@ type SystemUserRecord = User & {
   modulePermissions?: ModulePermission[];
   active?: boolean;
 };
+
+const emailsMatchForMockAuth = (candidateEmail?: string, loginEmail?: string) => {
+  const candidate = normalizeEmail(candidateEmail);
+  const login = normalizeEmail(loginEmail);
+  if (!candidate || !login) return false;
+  if (candidate === login) return true;
+
+  return (
+    getEmailDomain(login) === "sportgates.lt" &&
+    getEmailLocalPart(candidate) === getEmailLocalPart(login)
+  );
+};
+
+const findMockUserByLoginEmail = (loginEmail: string): AuthUser | undefined =>
+  mockUsers.find((user) => emailsMatchForMockAuth(user.email, loginEmail));
+
+const findSystemUserByLoginEmail = (
+  users: SystemUserRecord[],
+  loginEmail: string,
+): SystemUserRecord | undefined =>
+  users.find((user) => emailsMatchForMockAuth(user.email, loginEmail));
 
 const getConfiguredModulePermissions = (
   user: SystemUserRecord,
@@ -62,6 +88,37 @@ const ensureModulePermissionsConfig = (
     ...user,
     permissions: defaultPermissions,
     modulePermissions: defaultPermissions,
+  };
+};
+
+const hydrateAdditiveRoleSession = (
+  authUser: AuthUser,
+  sourceUser?: Partial<SystemUserRecord>,
+): AuthUser => {
+  const preview = resolveEffectivePermissionPreview(
+    {
+      role: (sourceUser?.role || authUser.role) as User["role"],
+      assignedRoleIds: sourceUser?.assignedRoleIds || authUser.assignedRoleIds,
+    },
+    defaultPermissionPreviewConfig,
+  );
+  const tenantIds = Array.from(
+    new Set(preview.tenantScopes.flatMap((scope) => scope.tenantIds)),
+  );
+
+  return {
+    ...authUser,
+    assignedRoleIds: preview.assignedRoleIds,
+    effectiveRoles: preview.assignedRoles,
+    tenantIds,
+    effectivePermissionsPreview: {
+      assignedRoleIds: preview.assignedRoleIds,
+      moduleAccess: preview.moduleAccess,
+      workflowAccess: preview.workflowAccess,
+      objectScopes: preview.objectScopes,
+      tenantScopes: preview.tenantScopes,
+      adminRights: preview.adminRights,
+    },
   };
 };
 
@@ -153,8 +210,9 @@ const saveAutoApprovedGoogleUser = (
   try {
     const parsedUsers =
       readMockStorage<SystemUserRecord[]>(SYSTEM_USERS_STORAGE_KEY) || [];
-    const existingUser = mergeUsers(systemUsers, parsedUsers).find(
-      (user) => normalizeEmail(user.email) === normalizedEmail,
+    const existingUser = findSystemUserByLoginEmail(
+      mergeUsers(systemUsers, parsedUsers),
+      normalizedEmail,
     );
 
     const approvedUser: SystemUserRecord = {
@@ -175,11 +233,16 @@ const saveAutoApprovedGoogleUser = (
 
     const nextUsers = existingUser
       ? parsedUsers.map((user) =>
-          normalizeEmail(user.email) === normalizedEmail ? approvedUserWithPermissions : user,
+          emailsMatchForMockAuth(user.email, normalizedEmail)
+            ? approvedUserWithPermissions
+            : user,
         )
       : [...parsedUsers, approvedUserWithPermissions];
 
-    if (existingUser && !parsedUsers.some((user) => normalizeEmail(user.email) === normalizedEmail)) {
+    if (
+      existingUser &&
+      !parsedUsers.some((user) => emailsMatchForMockAuth(user.email, normalizedEmail))
+    ) {
       nextUsers.push(approvedUserWithPermissions);
     }
 
@@ -208,7 +271,7 @@ const mapSystemUserToAuthUser = (
   const userWithPermissions = ensureModulePermissionsConfig(user);
   const permissions = userWithPermissions.modulePermissions || getDefaultModulePermissions(role);
 
-  return {
+  return hydrateAdditiveRoleSession({
     id: user.id,
     name: user.name || googleProfile?.name || user.email,
     email: normalizeEmail(user.email),
@@ -218,7 +281,7 @@ const mapSystemUserToAuthUser = (
     modulePermissions: permissions,
     is_active: user.is_active !== false && user.active !== false,
     avatarUrl: googleProfile?.picture,
-  };
+  }, userWithPermissions);
 };
 
 const persistUser = (user: AuthUser, remember: boolean) => {
@@ -274,7 +337,13 @@ const findStoredUser = (): AuthUser | null => {
   if (!storedId) return null;
 
   const authUser = mockUsers.find((user) => user.id === storedId && user.is_active);
-  if (authUser) return authUser;
+  if (authUser) {
+    const sourceUser = findSystemUserByLoginEmail(
+      getSystemUsers(),
+      authUser.email,
+    );
+    return hydrateAdditiveRoleSession(authUser, sourceUser);
+  }
 
   const systemUser = getSystemUsers().find(
     (user) =>
@@ -322,9 +391,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
       const normalizedEmail = normalizeEmail(email);
-      const user = mockUsers.find(
-        (item) => normalizeEmail(item.email) === normalizedEmail,
-      );
+      const user = findMockUserByLoginEmail(normalizedEmail);
 
       if (!user || password !== MOCK_PASSWORD) {
         console.debug("[auth] Email/password login failed:", normalizedEmail);
@@ -342,11 +409,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         };
       }
 
-      persistUser(user, remember);
-      setCurrentUser(user);
+      const sourceUser = findSystemUserByLoginEmail(
+        getSystemUsers(),
+        normalizedEmail,
+      );
+      const hydratedUser = hydrateAdditiveRoleSession(user, sourceUser);
+
+      persistUser(hydratedUser, remember);
+      setCurrentUser(hydratedUser);
       console.debug("[auth] Email/password login success:", user.id);
 
-      return { success: true };
+      return { success: true, user: hydratedUser };
     },
     [],
   );
@@ -374,9 +447,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       const internalUsers = getSystemUsers();
-      let systemUser = internalUsers.find(
-        (item) => normalizeEmail(item.email) === normalizedEmail,
-      );
+      let systemUser = findSystemUserByLoginEmail(internalUsers, normalizedEmail);
 
       if (!systemUser) {
         console.debug("[auth] Found user:", null);
@@ -457,7 +528,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       console.debug("[auth] Auth result:", "success");
       console.debug("[auth] Google login success:", user.id);
 
-      return { success: true };
+      return { success: true, user };
     },
     [],
   );

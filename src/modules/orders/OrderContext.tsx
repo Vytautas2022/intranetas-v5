@@ -17,6 +17,7 @@ interface OrderContextType {
   linkInvoice: (id: string, invNum: string, invUrl: string, user: string) => void;
   closeOrder: (id: string, actualCosts: number, user: string) => void;
   addComment: (id: string, text: string, user: string) => void;
+  updateOrderChecklists: (id: string, updates: Partial<Order>) => void;
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
@@ -110,11 +111,17 @@ export const OrderProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  const updateOrderChecklists = (id: string, updates: Partial<Order>) => {
+    updateOrder(id, (order) => {
+      Object.assign(order, updates);
+    });
+  };
+
   return (
     <OrderContext.Provider value={{ 
       orders, priceHistory, selectedOrderId, setSelectedOrderId,
       createOrder, submitForApproval, approveOrder, rejectOrder, advanceOrderStatus,
-      linkInvoice, closeOrder, addComment
+      linkInvoice, closeOrder, addComment, updateOrderChecklists
     }}>
       {children}
     </OrderContext.Provider>

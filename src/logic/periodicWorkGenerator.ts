@@ -4,6 +4,12 @@ import { Club } from '../mock-db/clubs';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { equipmentList, equipmentIssueTypesList } from '../mock-db/admin';
 import { Order } from '../mock-db/orders';
+import { cloneChecklistTemplatesForGeneratedCard } from './checklistLogic';
+import { workflowTypes as defaultWorkflowTypes } from '../mock-db/workflowTypes';
+import {
+  resolvePeriodicDestinationWorkflowTypeId,
+  type ResolvePeriodicDestinationWorkflowContext,
+} from './appWorkflowHelpers';
 
 export interface GenerationResult {
   newFaults: Fault[];
@@ -17,7 +23,8 @@ export const generatePeriodicWorksForClub = (
   existingFaults: Fault[],
   existingOrders: Order[],
   club: Club,
-  userName: string
+  userName: string,
+  workflowContext?: ResolvePeriodicDestinationWorkflowContext
 ): GenerationResult => {
   const newFaults: Fault[] = [];
   const newOrders: Order[] = [];
@@ -110,6 +117,7 @@ export const generatePeriodicWorksForClub = (
             }],
             updatedAt: Date.now(),
             updatedBy: 'SISTEMA',
+            checklists: cloneChecklistTemplatesForGeneratedCard(template),
             periodic: {
               isPeriodic: true,
               templateId: template.id,
@@ -145,6 +153,11 @@ export const generatePeriodicWorksForClub = (
           }
         }
     
+        const workflowResolution = resolvePeriodicDestinationWorkflowTypeId(template, {
+          workflowTypes: workflowContext?.workflowTypes || defaultWorkflowTypes,
+          fallbackLegacyCategory: workflowContext?.fallbackLegacyCategory || 'OTHER',
+        });
+
         const newFault: Fault = {
           id: `gen-${template.id}-${club.id}-${monthKey}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
           title: finalTitle,
@@ -186,6 +199,8 @@ export const generatePeriodicWorksForClub = (
           updatedBy: 'SISTEMA',
           code: `P-${format(now, 'MM')}-${template.id.slice(-4)}`,
           category: template.targetSubmodule === 'EQUIPMENT_FAULT' ? 'EQUIPMENT_FAULT' : (template.department || 'OPERATIONS'),
+          workflowTypeId: workflowResolution.workflowTypeId,
+          checklists: cloneChecklistTemplatesForGeneratedCard(template),
           periodic: {
             isPeriodic: true,
             templateId: template.id,

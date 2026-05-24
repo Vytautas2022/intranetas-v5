@@ -50,6 +50,7 @@ export type AdminModuleTabId =
   | "equipment_issues"
   | "cities"
   | "users"
+  | "roles_permissions"
   | "inventory"
   | "periodic_templates"
   | "periodiniai"
@@ -126,14 +127,15 @@ export const moduleRegistry: ModuleRegistryItem[] = [
     component: "PeriodicModule",
     permissions: ["periodiniai"],
     permissionKey: "periodiniai",
-    sidebarVisibility: "visible",
-    mobileVisible: true,
+    sidebarVisibility: "none",
+    mobileVisible: false,
     category: "operations",
     group: "Pagrindinis meniu",
     sortOrder: 40,
     activeModuleId: "darbai",
     tabId: "periodiniai",
-    showInSubNavigation: true,
+    // Legacy periodic template editing is disabled. Use System Administration → Periodiniai darbai.
+    showInSubNavigation: false,
   },
   {
     moduleId: "orders",
@@ -231,6 +233,11 @@ const adminRouteRegistry: AdminRouteRegistryItem[] = [
   { path: "/admin/miestai", tabId: "admin-cities", adminTabId: "cities" },
   { path: "/admin/padaliniai", tabId: "admin-clubs", adminTabId: "clubs" },
   { path: "/admin/vartotojai", tabId: "admin-users", adminTabId: "users" },
+  {
+    path: "/admin/roles-permissions",
+    tabId: "admin-roles-permissions",
+    adminTabId: "roles_permissions",
+  },
   {
     path: "/admin/treniruokliai",
     tabId: "admin-equipment",

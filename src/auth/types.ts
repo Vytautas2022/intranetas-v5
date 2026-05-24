@@ -1,4 +1,12 @@
 import type { UserRole } from "../types/roles";
+import type {
+  AdminRightsPermission,
+  ModuleAccessPermission,
+  ObjectScopePermission,
+  PermissionRole,
+  TenantScopePermission,
+  WorkflowAccessPermission,
+} from "../mock-db/permissions";
 
 export type ModulePermission =
   | "darbai"
@@ -16,6 +24,17 @@ export interface AuthUser {
   name: string;
   email: string;
   role: UserRole;
+  assignedRoleIds?: string[];
+  effectiveRoles?: PermissionRole[];
+  tenantIds?: string[];
+  effectivePermissionsPreview?: {
+    assignedRoleIds: string[];
+    moduleAccess: ModuleAccessPermission[];
+    workflowAccess: WorkflowAccessPermission[];
+    objectScopes: ObjectScopePermission[];
+    tenantScopes: TenantScopePermission[];
+    adminRights: AdminRightsPermission;
+  };
   region: string;
   regionAccess: string[];
   modulePermissions: ModulePermission[];
@@ -30,10 +49,10 @@ export interface AuthContextValue {
     email: string,
     password: string,
     remember: boolean,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   loginWithGoogleCredential: (
     credential: string,
     remember: boolean,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   logout: () => void;
 }

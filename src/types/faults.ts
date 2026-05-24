@@ -1,4 +1,5 @@
 import { Fault as MockFault, FaultComment } from '../mock-db/faults';
+import type { Checklist } from './checklists';
 
 export type { FaultComment };
 
@@ -72,6 +73,7 @@ export interface Fault extends MockFault {
   task_description_updated_at?: number;
   task_description_updated_by?: string;
   generatedAutomatically?: boolean;
+  checklists?: Checklist[];
 }
 
 export type TaskType = "SOP_CREATE" | "SOP_UPDATE";
