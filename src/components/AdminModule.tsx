@@ -34,10 +34,14 @@ import { getProductAnalytics } from "../logic/inventoryLogic";
 import { generateUniqueId } from "../logic/idLogic";
 import {
   canAccessAdminTabResolver,
+  compareLegacyVsResolverActionAccess,
   compareLegacyVsResolverAccess,
   compareLegacyVsResolverWorkflowAccess,
+  loadMockPermissionConfig,
+  resetMockPermissionConfig,
   resolveEffectivePermissionPreview,
   resolveUserAssignedRoles,
+  saveMockPermissionConfig,
   type PermissionPreviewConfig,
 } from "../logic/permissionPreviewResolver";
 import { productTransfers } from "../mock-db/transfers";
@@ -63,12 +67,6 @@ import {
   WorkflowType,
 } from "../mock-db/workflowTypes";
 import {
-  adminRightsPermissions as initialAdminRightsPermissions,
-  moduleAccessPermissions as initialModuleAccessPermissions,
-  objectScopePermissions as initialObjectScopePermissions,
-  permissionRoles as initialPermissionRoles,
-  tenantScopePermissions as initialTenantScopePermissions,
-  workflowAccessPermissions as initialWorkflowAccessPermissions,
   type AdminRightsPermission,
   type ModuleAccessPermission,
   type ObjectScopePermission,
@@ -202,23 +200,24 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const location = useLocation();
   const { currentUser } = useAuth();
   const path = location.pathname;
+  const initialPermissionConfig = useMemo(() => loadMockPermissionConfig(), []);
   const [permissionRoles, setPermissionRoles] =
-    useState<PermissionRole[]>(initialPermissionRoles);
+    useState<PermissionRole[]>(initialPermissionConfig.roles);
   const [permissionModuleAccess, setPermissionModuleAccess] = useState<
     ModuleAccessPermission[]
-  >(initialModuleAccessPermissions);
+  >(initialPermissionConfig.moduleAccess);
   const [permissionWorkflowAccess, setPermissionWorkflowAccess] = useState<
     WorkflowAccessPermission[]
-  >(initialWorkflowAccessPermissions);
+  >(initialPermissionConfig.workflowAccess);
   const [permissionObjectScopes, setPermissionObjectScopes] = useState<
     ObjectScopePermission[]
-  >(initialObjectScopePermissions);
+  >(initialPermissionConfig.objectScopes);
   const [permissionTenantScopes, setPermissionTenantScopes] = useState<
     TenantScopePermission[]
-  >(initialTenantScopePermissions);
+  >(initialPermissionConfig.tenantScopes);
   const [permissionAdminRights, setPermissionAdminRights] = useState<
     AdminRightsPermission[]
-  >(initialAdminRightsPermissions);
+  >(initialPermissionConfig.adminRights);
   const permissionPreviewConfig: PermissionPreviewConfig = {
     roles: permissionRoles,
     moduleAccess: permissionModuleAccess,
@@ -226,6 +225,27 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     objectScopes: permissionObjectScopes,
     tenantScopes: permissionTenantScopes,
     adminRights: permissionAdminRights,
+  };
+
+  useEffect(() => {
+    saveMockPermissionConfig(permissionPreviewConfig);
+  }, [
+    permissionRoles,
+    permissionModuleAccess,
+    permissionWorkflowAccess,
+    permissionObjectScopes,
+    permissionTenantScopes,
+    permissionAdminRights,
+  ]);
+
+  const handleResetMockPermissions = () => {
+    const defaults = resetMockPermissionConfig();
+    setPermissionRoles(defaults.roles);
+    setPermissionModuleAccess(defaults.moduleAccess);
+    setPermissionWorkflowAccess(defaults.workflowAccess);
+    setPermissionObjectScopes(defaults.objectScopes);
+    setPermissionTenantScopes(defaults.tenantScopes);
+    setPermissionAdminRights(defaults.adminRights);
   };
   const legacyPeriodicTemplatesRoute = getAdminTabRoutePath("periodic_templates");
   const isLegacyPeriodicTemplatesRoute = Boolean(
@@ -327,6 +347,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setAdminRights={setPermissionAdminRights}
             users={users}
             currentUser={currentUser}
+            onResetMockPermissions={handleResetMockPermissions}
           />
         )}
         {path.includes(getTabRoute("clubs")) && (
@@ -418,6 +439,7 @@ function RolesPermissionsPlaceholder({
   setAdminRights,
   users,
   currentUser,
+  onResetMockPermissions,
 }: {
   roles: PermissionRole[];
   setRoles: React.Dispatch<React.SetStateAction<PermissionRole[]>>;
@@ -435,6 +457,7 @@ function RolesPermissionsPlaceholder({
   setAdminRights: React.Dispatch<React.SetStateAction<AdminRightsPermission[]>>;
   users: User[];
   currentUser: AuthUser | null;
+  onResetMockPermissions: () => void;
 }) {
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleDescription, setNewRoleDescription] = useState("");
@@ -515,6 +538,16 @@ function RolesPermissionsPlaceholder({
     ),
   );
   const workflowShadowMismatches = workflowShadowComparisons.filter(
+    (comparison) => comparison.mismatch,
+  );
+  const actionShadowComparisons = users.flatMap((user) =>
+    compareLegacyVsResolverActionAccess(
+      user,
+      activeWorkflows,
+      permissionsConfig,
+    ),
+  );
+  const actionShadowMismatches = actionShadowComparisons.filter(
     (comparison) => comparison.mismatch,
   );
   const workflowLegacyFallbackCount = workflowShadowComparisons.filter(
@@ -840,25 +873,33 @@ function RolesPermissionsPlaceholder({
               Permissions engine placeholder. Full implementation later.
             </p>
           </div>
-          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
-            {(
-              canViewMigrationCheck
-                ? (["roles", "migration"] as const)
-                : (["roles"] as const)
-            ).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActivePermissionsTab(tab)}
-                className={cn(
-                  "rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
-                  activePermissionsTab === tab
-                    ? "bg-white text-slate-950 shadow-sm"
-                    : "text-slate-500 hover:text-slate-800",
-                )}
-              >
-                {tab === "roles" ? "Roles" : "Migration Check"}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={onResetMockPermissions}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+            >
+              Reset mock permissions
+            </button>
+            <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+              {(
+                canViewMigrationCheck
+                  ? (["roles", "migration"] as const)
+                  : (["roles"] as const)
+              ).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActivePermissionsTab(tab)}
+                  className={cn(
+                    "rounded-xl px-4 py-2 text-sm font-semibold transition-colors",
+                    activePermissionsTab === tab
+                      ? "bg-white text-slate-950 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800",
+                  )}
+                >
+                  {tab === "roles" ? "Roles" : "Migration Check"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1259,10 +1300,13 @@ function RolesPermissionsPlaceholder({
                   <span className="inline-flex w-fit items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
                     Workflow visibility enforced
                   </span>
+                  <span className="inline-flex w-fit items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                    Create enforcement enabled
+                  </span>
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
                   <p className="text-xs font-semibold text-slate-500">
                     Module mismatches
@@ -1277,6 +1321,14 @@ function RolesPermissionsPlaceholder({
                   </p>
                   <p className="mt-2 text-3xl font-bold text-slate-950">
                     {workflowShadowMismatches.length}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Action mismatches
+                  </p>
+                  <p className="mt-2 text-3xl font-bold text-slate-950">
+                    {actionShadowMismatches.length}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
@@ -1471,6 +1523,102 @@ function RolesPermissionsPlaceholder({
                               {comparison.resolverDataMissing
                                 ? "Legacy fallback"
                                 : "Resolver data"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-1 text-xs font-bold",
+                                  comparison.mismatch
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-slate-100 text-slate-500",
+                                )}
+                              >
+                                {comparison.mismatch ? "Mismatch" : "Match"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70">
+                  <div className="border-b border-slate-200/70 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Action Permissions Diagnostics
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Current action availability compared with resolver
+                          create, edit, transition, close, approve and admin
+                          previews. Diagnostics only; no action is blocked.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+                          No enforcement
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-2.5 py-1 text-xs font-bold",
+                            actionShadowMismatches.length
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-emerald-100 text-emerald-700",
+                          )}
+                        >
+                          {actionShadowMismatches.length
+                            ? `${actionShadowMismatches.length} mismatch`
+                            : "No mismatches"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[860px] text-left text-sm">
+                      <thead className="bg-white/60 text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">User</th>
+                          <th className="px-4 py-3 font-semibold">Action</th>
+                          <th className="px-4 py-3 font-semibold">Target</th>
+                          <th className="px-4 py-3 font-semibold">Legacy UI</th>
+                          <th className="px-4 py-3 font-semibold">Resolver</th>
+                          <th className="px-4 py-3 font-semibold">Mode</th>
+                          <th className="px-4 py-3 font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(actionShadowMismatches.length
+                          ? actionShadowMismatches
+                          : actionShadowComparisons.slice(0, 24)
+                        ).map((comparison) => (
+                          <tr
+                            key={`${comparison.userId}-${comparison.action}-${comparison.targetId}`}
+                          >
+                            <td className="px-4 py-3 font-semibold text-slate-900">
+                              {comparison.userName}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.action}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {comparison.targetLabel}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.legacyAllowed
+                                ? "Available"
+                                : "Unavailable"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.resolverAllowed
+                                ? "Allowed"
+                                : "Denied"}
+                            </td>
+                            <td className="px-4 py-3">
+                              {comparison.noEnforcement
+                                ? "Diagnostics only"
+                                : "Enforced"}
                             </td>
                             <td className="px-4 py-3">
                               <span

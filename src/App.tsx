@@ -155,6 +155,7 @@ import {
   returnTaskToDarbai,
   promoteSomedayToProject,
 } from "./logic/conversionLogic";
+import { canCreateWorkflowCardResolver } from "./logic/permissionPreviewResolver";
 
 import { cn } from "./lib/utils";
 import { HomeActionModal } from "./components/HomeActionModal";
@@ -3882,14 +3883,13 @@ function MainApp() {
       ? "ALL"
       : currentUser.region,
   );
-  const [clubFilter, setClubFilter] = useState("all");
+  const [clubFilter, setClubFilter] = useState<string[]>([]);
   const [slaFilter, setSlaFilter] = useState("visi");
   const [sourceFilter, setSourceFilter] = useState<"ALL" | "QR">("ALL");
-  const [quickFilter, setQuickFilter] = useState<
-    "all" | "mine" | "delayed" | "near" | "priority"
-  >("all");
+  const [quickFilter, setQuickFilter] = useState<"all" | "delayed" | "near">(
+    "all",
+  );
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
-  const [typeFilters, setTypeFilters] = useState<string[]>([]);
   const [selectedWorkflowTypeIds, setSelectedWorkflowTypeIds] = useState<
     string[]
   >([]);
@@ -4627,6 +4627,30 @@ function MainApp() {
   };
 
   const handleRegister = () => {
+    const workflowForCreate =
+      workflowTypes.find((workflow) => workflow.id === regForm.workflowTypeId) ||
+      getWorkflowTypeByLegacyCategory(regForm.category);
+    const workflowTypeIdForCreate =
+      workflowForCreate?.id ||
+      regForm.workflowTypeId ||
+      (regForm.orderCategory ? "orders" : undefined);
+    const createModuleId =
+      workflowForCreate?.action === "order" || regForm.orderCategory
+        ? "orders"
+        : "darbai";
+
+    if (
+      !workflowTypeIdForCreate ||
+      !canCreateWorkflowCardResolver(
+        currentUser,
+        workflowTypeIdForCreate,
+        createModuleId,
+      )
+    ) {
+      alert("Neturite teisės kurti kortelės šiame workflow.");
+      return;
+    }
+
     if (regForm.orderCategory) {
       if (!regForm.clubId) {
         setRegValidationErrors({ clubId: "Pasirinkite sporto klubą" });
@@ -5812,8 +5836,8 @@ ${task.updatedBy}
   // --- Data Scoping & Filtering ---
 
   const scopedEntities = useMemo(
-    () => getScopedEntities(faults, tasks, currentUser, selectedRegion),
-    [faults, tasks, currentUser, selectedRegion],
+    () => getScopedEntities(faults, tasks, currentUser, selectedRegion, appClubs),
+    [faults, tasks, currentUser, selectedRegion, appClubs],
   );
 
   const { scopedFaults, scopedTasks } = useMemo(
@@ -5831,6 +5855,39 @@ ${task.updatedBy}
     [visibleWorkflowTypes],
   );
 
+  const creatableVisibleWorkflowTypes = useMemo(
+    () =>
+      visibleWorkflowTypes.filter((workflow) =>
+        canCreateWorkflowCardResolver(
+          currentUser,
+          workflow.id,
+          workflow.action === "order" ? "orders" : "darbai",
+        ),
+      ),
+    [currentUser, visibleWorkflowTypes],
+  );
+  const canCreateVisibleWorkflow = creatableVisibleWorkflowTypes.length > 0;
+
+  const openRegistrationHome = () => {
+    if (!canCreateVisibleWorkflow) {
+      resetRegForm();
+      setActiveModal(null);
+      return;
+    }
+
+    setActiveModal("home");
+  };
+
+  useEffect(() => {
+    if (
+      (activeModal === "home" || activeModal === "fault") &&
+      !canCreateVisibleWorkflow
+    ) {
+      resetRegForm();
+      setActiveModal(null);
+    }
+  }, [activeModal, canCreateVisibleWorkflow]);
+
   useEffect(() => {
     setSelectedWorkflowTypeIds((previous) =>
       previous.filter((workflowTypeId) =>
@@ -5841,16 +5898,68 @@ ${task.updatedBy}
 
   const permittedWorkflowTypeIds = visibleWorkflowTypeIds;
 
+  const activeRegionOptions = useMemo(
+    () => appCities.filter((city) => city.is_active !== false),
+    [appCities],
+  );
+
+  const selectedRegionCityId = useMemo(
+    () => activeRegionOptions.find((city) => city.name === selectedRegion)?.id,
+    [activeRegionOptions, selectedRegion],
+  );
+
+  const activeFilterClubs = useMemo(
+    () =>
+      appClubs.filter((club) => {
+        if (club.is_active === false) return false;
+        if (!canManageAllClubs(currentUser)) {
+          return club.region === currentUser.region;
+        }
+        return (
+          selectedRegion === "ALL" ||
+          club.region === selectedRegion ||
+          club.city === selectedRegion ||
+          Boolean(selectedRegionCityId && club.city_id === selectedRegionCityId)
+        );
+      }),
+    [appClubs, currentUser, selectedRegion, selectedRegionCityId],
+  );
+
+  const selectedClubNames = useMemo(
+    () =>
+      clubFilter
+        .map((clubId) => appClubs.find((club) => club.id === clubId)?.name)
+        .filter((name): name is string => Boolean(name)),
+    [appClubs, clubFilter],
+  );
+
+  const clubFilterSummary =
+    clubFilter.length === 0
+      ? "Visi klubai"
+      : clubFilter.length === 1
+        ? selectedClubNames[0] || "1 klubas pasirinktas"
+        : `${clubFilter.length} klubai pasirinkti`;
+
+  useEffect(() => {
+    const activeClubIds = new Set(activeFilterClubs.map((club) => club.id));
+    const nextClubFilter = clubFilter.filter((clubId) =>
+      activeClubIds.has(clubId),
+    );
+
+    if (nextClubFilter.length !== clubFilter.length) {
+      setClubFilter(nextClubFilter);
+    }
+  }, [activeFilterClubs, clubFilter]);
+
   const filteredEntities = useMemo(
     () =>
       filterBoardEntities({
         scopedEntities,
         activeTab,
         searchQuery,
-        clubs: CLUBS,
+        clubs: appClubs,
         getRemainingTime,
         slaFilter,
-        typeFilters,
         sourceFilter,
         appUsers,
         currentUser,
@@ -5865,8 +5974,8 @@ ${task.updatedBy}
       scopedEntities,
       activeTab,
       searchQuery,
+      appClubs,
       slaFilter,
-      typeFilters,
       sourceFilter,
       appUsers,
       currentUser,
@@ -5884,11 +5993,10 @@ ${task.updatedBy}
     () =>
       getActiveDarbaiWorkflowIds(
         workflowTypes,
-        typeFilters,
         selectedWorkflowTypeIds,
         currentUser,
       ),
-    [workflowTypes, typeFilters, selectedWorkflowTypeIds, currentUser],
+    [workflowTypes, selectedWorkflowTypeIds, currentUser],
   );
   const hasUnmappedStatuses = useMemo(
     () => hasUnmappedWorkflowStatuses(filteredEntities),
@@ -6248,7 +6356,7 @@ ${task.updatedBy}
                 setActiveModule("darbai");
                 setActiveTab(tab as any);
                 if (filters?.clubId) {
-                  setClubFilter(filters.clubId);
+                  setClubFilter([filters.clubId]);
                 }
                 if (filters?.search) {
                   setSearchQuery(filters.search);
@@ -6262,16 +6370,9 @@ ${task.updatedBy}
             ) : (
               <OpsFlowView
                 tasks={faults}
-                onNavigateTo={(status, type) => {
+                onNavigateTo={() => {
                   setActiveModule("darbai");
                   setActiveTab("kanban" as any);
-                  setTypeFilters([
-                    type === "gedimai"
-                      ? "FACILITY_FAULT"
-                      : type === "uzsakymai"
-                        ? "ORDER"
-                        : "OTHER",
-                  ]); // Simplified mapping
                 }}
               />
             )
@@ -6321,24 +6422,18 @@ ${task.updatedBy}
                     <div className="flex items-center gap-4">
                       {/* Primary Operational Filters */}
                       <div className="flex gap-2">
-                        {[
+                        {([
                           { id: "all", label: "Visi", icon: LayoutDashboard },
-                          { id: "mine", label: "Mano", icon: UserIcon },
                           {
                             id: "delayed",
                             label: "Vėluojantys",
                             icon: AlertTriangle,
                           },
                           { id: "near", label: "<24h", icon: Clock },
-                          {
-                            id: "priority",
-                            label: "Kritiniai",
-                            icon: AlertCircle,
-                          },
-                        ].map((qf) => (
+                        ] as const).map((qf) => (
                           <button
                             key={`qf-${qf.id}`}
-                            onClick={() => setQuickFilter(qf.id as any)}
+                            onClick={() => setQuickFilter(qf.id)}
                             className={cn(
                               "px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border whitespace-nowrap",
                               quickFilter === qf.id
@@ -6374,9 +6469,8 @@ ${task.updatedBy}
                         onClick={() => setIsFilterModalOpen(true)}
                         className={cn(
                           "px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all border shadow-sm whitespace-nowrap",
-                          typeFilters.length > 0 ||
-                            selectedRegion !== "ALL" ||
-                            clubFilter !== "all" ||
+                          selectedRegion !== "ALL" ||
+                            clubFilter.length > 0 ||
                             assigneeFilter !== "ALL" ||
                             sourceFilter !== "ALL"
                             ? "bg-brand-lime text-black border-brand-lime"
@@ -6385,15 +6479,13 @@ ${task.updatedBy}
                       >
                         <Settings2 size={16} />
                         Filtrai
-                        {(typeFilters.length > 0 ||
-                          selectedRegion !== "ALL" ||
-                          clubFilter !== "all" ||
+                        {(selectedRegion !== "ALL" ||
+                          clubFilter.length > 0 ||
                           assigneeFilter !== "ALL" ||
                           sourceFilter !== "ALL") && (
                           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-brand-lime text-[10px] text-black font-black">
-                            {typeFilters.length +
-                              (selectedRegion !== "ALL" ? 1 : 0) +
-                              (clubFilter !== "all" ? 1 : 0) +
+                            {(selectedRegion !== "ALL" ? 1 : 0) +
+                              (clubFilter.length > 0 ? 1 : 0) +
                               (assigneeFilter !== "ALL" ? 1 : 0) +
                               (sourceFilter !== "ALL" ? 1 : 0)}
                           </span>
@@ -6402,9 +6494,8 @@ ${task.updatedBy}
                     </div>
 
                     {/* Active Filter Summary UI */}
-                    {(typeFilters.length > 0 ||
-                      selectedRegion !== "ALL" ||
-                      clubFilter !== "all" ||
+                    {(selectedRegion !== "ALL" ||
+                      clubFilter.length > 0 ||
                       assigneeFilter !== "ALL" ||
                       sourceFilter !== "ALL") && (
                       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-50 overflow-x-auto no-scrollbar pb-1">
@@ -6413,34 +6504,11 @@ ${task.updatedBy}
                         </span>
 
                         <div className="flex gap-2 items-center">
-                          {typeFilters.map((tf) => (
-                            <button
-                              key={`pill-${tf}`}
-                              onClick={() =>
-                                setTypeFilters((prev) =>
-                                  prev.filter((x) => x !== tf),
-                                )
-                              }
-                              className="px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold flex items-center gap-1.5 hover:bg-slate-200 transition-all border border-slate-200"
-                            >
-                              {tf === "FACILITY_FAULT"
-                                ? "Patalpų"
-                                : tf === "EQUIPMENT_FAULT"
-                                  ? "Treniruoklių"
-                                  : tf === "ORDER"
-                                    ? "Užsakymai"
-                                    : tf === "OTHER"
-                                      ? "Kiti"
-                                      : tf}
-                              <X size={10} />
-                            </button>
-                          ))}
-
                           {selectedRegion !== "ALL" && (
                             <button
                               onClick={() => {
                                 setSelectedRegion("ALL");
-                                setClubFilter("all");
+                                setClubFilter([]);
                               }}
                               className="px-3 py-1 rounded-full bg-brand-lime text-black text-[10px] font-bold flex items-center gap-1.5 hover:opacity-80 transition-all border border-brand-lime"
                             >
@@ -6449,13 +6517,12 @@ ${task.updatedBy}
                             </button>
                           )}
 
-                          {clubFilter !== "all" && (
+                          {clubFilter.length > 0 && (
                             <button
-                              onClick={() => setClubFilter("all")}
+                              onClick={() => setClubFilter([])}
                               className="px-3 py-1 rounded-full bg-brand-lime text-black text-[10px] font-bold flex items-center gap-1.5 hover:opacity-80 transition-all border border-brand-lime"
                             >
-                              {CLUBS.find((c) => c.id === clubFilter)?.name ||
-                                clubFilter}
+                              {clubFilterSummary}
                               <X size={10} />
                             </button>
                           )}
@@ -6467,8 +6534,8 @@ ${task.updatedBy}
                             >
                               {assigneeFilter === "MINE"
                                 ? "Mano"
-                                : assigneeFilter === "OPS"
-                                  ? "OPS"
+                                : assigneeFilter === "UNASSIGNED"
+                                  ? "Nepriskirta"
                                   : appUsers.find(
                                       (u) => u.id === assigneeFilter,
                                     )?.name || assigneeFilter}
@@ -6488,9 +6555,8 @@ ${task.updatedBy}
 
                           <button
                             onClick={() => {
-                              setTypeFilters([]);
                               setSelectedRegion("ALL");
-                              setClubFilter("all");
+                              setClubFilter([]);
                               setAssigneeFilter("ALL");
                               setSourceFilter("ALL");
                               setPeriodicFilter("ALL");
@@ -6507,22 +6573,17 @@ ${task.updatedBy}
                   {/* MOBILE FILTERS */}
                   <div className="md:hidden p-4 space-y-3">
                     <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                      {[
+                      {([
                         { id: "all", label: "Visi", icon: LayoutDashboard },
                         {
                           id: "delayed",
                           label: "Vėluojantys",
                           icon: AlertTriangle,
                         },
-                        {
-                          id: "priority",
-                          label: "Kritiniai",
-                          icon: AlertCircle,
-                        },
-                      ].map((qf) => (
+                      ] as const).map((qf) => (
                         <button
                           key={`mob-qf-${qf.id}`}
-                          onClick={() => setQuickFilter(qf.id as any)}
+                          onClick={() => setQuickFilter(qf.id)}
                           className={cn(
                             "py-2.5 px-4 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 border whitespace-nowrap",
                             quickFilter === qf.id
@@ -6538,9 +6599,8 @@ ${task.updatedBy}
                         onClick={() => setIsFilterModalOpen(true)}
                         className={cn(
                           "py-2.5 px-4 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 border",
-                          typeFilters.length > 0 ||
-                            selectedRegion !== "ALL" ||
-                            clubFilter !== "all" ||
+                          selectedRegion !== "ALL" ||
+                            clubFilter.length > 0 ||
                             assigneeFilter !== "ALL" ||
                             sourceFilter !== "ALL"
                             ? "bg-brand-lime text-black border-brand-lime"
@@ -6622,11 +6682,11 @@ ${task.updatedBy}
                                   currentUserRole={currentUser.role}
                                   columnFaults={columnFaults}
                                 >
-                                  {status === Status.NEW && (
+                                  {status === Status.NEW && canCreateVisibleWorkflow && (
                                     <motion.button
                                       whileHover={{ scale: 1.01 }}
                                       whileTap={{ scale: 0.99 }}
-                                      onClick={() => setActiveModal("home")}
+                                      onClick={openRegistrationHome}
                                       className="w-full aspect-[3/1] mb-4 border-2 border-dashed border-slate-100 bg-white rounded-xl flex flex-col items-center justify-center gap-1 hover:border-brand-lime transition-all text-slate-400 hover:text-brand-lime group shadow-sm p-2"
                                     >
                                       <Plus
@@ -7006,9 +7066,9 @@ ${task.updatedBy}
         </AnimatePresence>
 
         {/* FAB for Registration */}
-        {activeModule === "darbai" && (
+        {activeModule === "darbai" && canCreateVisibleWorkflow && (
           <button
-            onClick={() => setActiveModal("home")}
+            onClick={openRegistrationHome}
             className="fixed bottom-6 right-6 lg:bottom-10 lg:right-10 w-14 h-14 bg-brand-lime text-black rounded-full flex items-center justify-center shadow-xl shadow-brand-lime/20 hover:scale-110 active:scale-95 transition-all z-[45]"
           >
             <Plus size={28} />
@@ -7046,56 +7106,6 @@ ${task.updatedBy}
                 </div>
 
                 <div className="space-y-6">
-                  {/* Category Filters (Multi-select) */}
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">
-                      Kategorija
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { id: "FACILITY_FAULT", label: "Patalpų" },
-                        { id: "EQUIPMENT_FAULT", label: "Treniruoklių" },
-                        { id: "ORDER", label: "Užsakymai" },
-                        { id: "OTHER", label: "Kiti" },
-                      ].map((cat) => (
-                        <button
-                          key={`modal-cat-${cat.id}`}
-                          onClick={() => {
-                            setTypeFilters((prev) =>
-                              prev.includes(cat.id)
-                                ? prev.filter((x) => x !== cat.id)
-                                : [...prev, cat.id],
-                            );
-                          }}
-                          className={cn(
-                            "px-4 py-3 rounded-2xl text-xs font-bold border transition-all text-left flex items-center justify-between",
-                            typeFilters.includes(cat.id)
-                              ? "bg-slate-900 text-white border-slate-900 shadow-lg"
-                              : "bg-slate-50 text-slate-600 border-slate-100 hover:border-slate-300",
-                          )}
-                        >
-                          {cat.label}
-                          <div
-                            className={cn(
-                              "w-4 h-4 rounded flex items-center justify-center transition-all",
-                              typeFilters.includes(cat.id)
-                                ? "bg-brand-lime"
-                                : "bg-white border border-slate-200",
-                            )}
-                          >
-                            {typeFilters.includes(cat.id) && (
-                              <Check
-                                size={10}
-                                className="text-black"
-                                strokeWidth={4}
-                              />
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                   {/* Source Filter (QR) */}
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">
@@ -7148,34 +7158,35 @@ ${task.updatedBy}
                       Regionas
                     </label>
                     <div className="grid grid-cols-2 gap-2">
-                      {["ALL", "Vilnius", "Kaunas", "Klaipėda"].map(
-                        (region) => (
-                          <button
-                            key={region}
-                            onClick={() => {
-                              setSelectedRegion(region);
-                              setClubFilter("all");
-                            }}
-                            disabled={
-                              !canManageAllClubs(currentUser) &&
-                              region !== "ALL" &&
-                              region !== currentUser.region
-                            }
-                            className={cn(
-                              "px-4 py-3 rounded-2xl text-sm font-bold border transition-all text-left",
-                              selectedRegion === region
-                                ? "bg-slate-900 text-white border-slate-900 shadow-lg"
-                                : "bg-slate-50 text-slate-600 border-slate-100 hover:border-slate-300",
-                              !canManageAllClubs(currentUser) &&
-                                region !== "ALL" &&
-                                region !== currentUser.region &&
-                                "opacity-50 cursor-not-allowed",
-                            )}
-                          >
-                            {region === "ALL" ? "Visi regionai" : region}
-                          </button>
-                        ),
-                      )}
+                      {[
+                        { id: "ALL", name: "ALL" },
+                        ...activeRegionOptions,
+                      ].map((region) => (
+                        <button
+                          key={`region-filter-${region.id}`}
+                          onClick={() => {
+                            setSelectedRegion(region.name);
+                            setClubFilter([]);
+                          }}
+                          disabled={
+                            !canManageAllClubs(currentUser) &&
+                            region.name !== "ALL" &&
+                            region.name !== currentUser.region
+                          }
+                          className={cn(
+                            "px-4 py-3 rounded-2xl text-sm font-bold border transition-all text-left",
+                            selectedRegion === region.name
+                              ? "bg-slate-900 text-white border-slate-900 shadow-lg"
+                              : "bg-slate-50 text-slate-600 border-slate-100 hover:border-slate-300",
+                            !canManageAllClubs(currentUser) &&
+                              region.name !== "ALL" &&
+                              region.name !== currentUser.region &&
+                              "opacity-50 cursor-not-allowed",
+                          )}
+                        >
+                          {region.name === "ALL" ? "Visi regionai" : region.name}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -7184,25 +7195,65 @@ ${task.updatedBy}
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">
                       Klubas
                     </label>
-                    <select
-                      value={clubFilter}
-                      onChange={(e) => setClubFilter(e.target.value)}
-                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold focus:ring-2 focus:ring-brand-lime outline-none transition-all appearance-none"
-                    >
-                      <option value="all">Visi klubai</option>
-                      {CLUBS.filter((c) => {
-                        if (!canManageAllClubs(currentUser))
-                          return c.region === currentUser.region;
-                        return (
-                          selectedRegion === "ALL" ||
-                          c.region === selectedRegion
-                        );
-                      }).map((c) => (
-                        <option key={`club-option-filter-${c.id}`} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3 px-1">
+                        <span className="text-sm font-bold text-slate-700">
+                          {clubFilterSummary}
+                        </span>
+                        {clubFilter.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setClubFilter([])}
+                            className="text-[11px] font-bold text-slate-400 hover:text-slate-700 transition-colors"
+                          >
+                            Išvalyti
+                          </button>
+                        )}
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                        {activeFilterClubs.map((club) => {
+                          const selected = clubFilter.includes(club.id);
+
+                          return (
+                            <button
+                              key={`club-option-filter-${club.id}`}
+                              type="button"
+                              onClick={() =>
+                                setClubFilter((previous) =>
+                                  previous.includes(club.id)
+                                    ? previous.filter((id) => id !== club.id)
+                                    : [...previous, club.id],
+                                )
+                              }
+                              className={cn(
+                                "w-full px-3 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-between text-left",
+                                selected
+                                  ? "bg-slate-900 text-white"
+                                  : "bg-white text-slate-600 hover:bg-slate-100",
+                              )}
+                            >
+                              <span>{club.name}</span>
+                              <span
+                                className={cn(
+                                  "w-4 h-4 rounded border flex items-center justify-center",
+                                  selected
+                                    ? "bg-brand-lime border-brand-lime"
+                                    : "bg-white border-slate-200",
+                                )}
+                              >
+                                {selected && (
+                                  <Check
+                                    size={10}
+                                    className="text-black"
+                                    strokeWidth={4}
+                                  />
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Assignee Filter */}
@@ -7217,9 +7268,9 @@ ${task.updatedBy}
                     >
                       <option value="ALL">Visi atsakingi</option>
                       <option value="MINE">Mano užduotys</option>
-                      <option value="OPS">OPS</option>
+                      <option value="UNASSIGNED">Nepriskirta</option>
                       <optgroup label="Darbuotojai">
-                        {users
+                        {appUsers
                           .filter((u) => u.is_active !== false)
                           .map((u) => (
                             <option
@@ -7237,9 +7288,8 @@ ${task.updatedBy}
                 <div className="mt-10 flex gap-4">
                   <button
                     onClick={() => {
-                      setTypeFilters([]);
                       setSelectedRegion("ALL");
-                      setClubFilter("all");
+                      setClubFilter([]);
                       setAssigneeFilter("ALL");
                       setSourceFilter("ALL");
                     }}
@@ -7264,18 +7314,27 @@ ${task.updatedBy}
           <HomeActionModal
             isOpen={activeModal === "home"}
             onClose={() => setActiveModal(null)}
-            workflows={visibleWorkflowTypes}
+            workflows={creatableVisibleWorkflowTypes}
             currentUser={currentUser}
             onSelectAction={(action, subType, workflowTypeId) => {
               const workflow =
-                visibleWorkflowTypes.find(
+                creatableVisibleWorkflowTypes.find(
                   (visibleWorkflow) => visibleWorkflow.id === workflowTypeId,
                 ) ||
-                visibleWorkflowTypes.find(
+                creatableVisibleWorkflowTypes.find(
                   (visibleWorkflow) =>
                     visibleWorkflow.legacyCategory === subType,
                 );
               if (!workflow) return;
+              if (
+                !canCreateWorkflowCardResolver(
+                  currentUser,
+                  workflow.id,
+                  workflow.action === "order" ? "orders" : "darbai",
+                )
+              ) {
+                return;
+              }
 
               resetRegForm();
               setRegForm((prev) => ({
@@ -7326,13 +7385,13 @@ ${task.updatedBy}
                       <button
                         onClick={() => {
                           if (regStep === 3) {
-                            setActiveModal("home");
+                            openRegistrationHome();
                           } else {
                             // Step 2
                             if (regForm.orderCategory) {
                               setRegStep(3);
                             } else {
-                              setActiveModal("home");
+                              openRegistrationHome();
                             }
                           }
                         }}
@@ -9124,6 +9183,21 @@ ${task.updatedBy}
             }
           }}
           onRegisterFault={(clubId, equipmentId) => {
+            const equipmentWorkflow =
+              getWorkflowTypeByLegacyCategory("EQUIPMENT_FAULT");
+            if (
+              !equipmentWorkflow ||
+              !canCreateWorkflowCardResolver(
+                currentUser,
+                equipmentWorkflow.id,
+                "darbai",
+              )
+            ) {
+              resetRegForm();
+              setActiveModal(null);
+              return;
+            }
+
             setRegForm((prev) => ({
               ...prev,
               category: "EQUIPMENT_FAULT",

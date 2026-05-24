@@ -4,7 +4,10 @@ import { AlertCircle, X } from "lucide-react";
 import { cn } from "../lib/utils";
 import { workflowIconMap, WorkflowType } from "../mock-db/workflowTypes";
 import type { AuthUser } from "../auth/types";
-import { canViewWorkflowResolver } from "../logic/permissionPreviewResolver";
+import {
+  canCreateWorkflowCardResolver,
+  canViewWorkflowResolver,
+} from "../logic/permissionPreviewResolver";
 
 interface HomeActionModalProps {
   isOpen: boolean;
@@ -35,7 +38,15 @@ export const HomeActionModal: React.FC<HomeActionModalProps> = ({
   currentUser,
 }) => {
   const visibleWorkflows = currentUser
-    ? workflows.filter((workflow) => canViewWorkflowResolver(currentUser, workflow))
+    ? workflows.filter(
+        (workflow) =>
+          canViewWorkflowResolver(currentUser, workflow) &&
+          canCreateWorkflowCardResolver(
+            currentUser,
+            workflow.id,
+            workflow.action === "order" ? "orders" : "darbai",
+          ),
+      )
     : workflows;
 
   const groups = categoryOrder

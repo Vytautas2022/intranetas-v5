@@ -84,6 +84,32 @@ export interface WorkflowShadowComparison {
   mismatch: boolean;
 }
 
+export type ActionPermissionType =
+  | "workflow-card-create"
+  | "workflow-card-edit"
+  | "assignee-change"
+  | "comments-edit-delete"
+  | "checklist-edit"
+  | "kanban-drag-drop"
+  | "status-dropdown"
+  | "waiting-modal"
+  | "workflow-card-close"
+  | "orders-create"
+  | "workflow-item-approve"
+  | "admin-config-edit";
+
+export interface ActionPermissionComparison {
+  userId: string;
+  userName: string;
+  action: ActionPermissionType;
+  targetId: string;
+  targetLabel: string;
+  legacyAllowed: boolean;
+  resolverAllowed: boolean;
+  noEnforcement: true;
+  mismatch: boolean;
+}
+
 type WorkflowPermissionSubject =
   | (Pick<AuthUser, "role"> & {
       assignedRoleIds?: string[];
@@ -112,6 +138,81 @@ export const defaultPermissionPreviewConfig: PermissionPreviewConfig = {
   tenantScopes: tenantScopePermissions,
   adminRights: adminRightsPermissions,
 };
+
+export const MOCK_PERMISSION_CONFIG_STORAGE_KEY =
+  "sg_mock_permissions_config";
+
+const isBrowserStorageAvailable = () =>
+  typeof window !== "undefined" && Boolean(window.localStorage);
+
+const clonePermissionPreviewConfig = (
+  config: PermissionPreviewConfig,
+): PermissionPreviewConfig => ({
+  roles: [...config.roles],
+  moduleAccess: [...config.moduleAccess],
+  workflowAccess: [...config.workflowAccess],
+  objectScopes: [...config.objectScopes],
+  tenantScopes: [...config.tenantScopes],
+  adminRights: [...config.adminRights],
+});
+
+const isPermissionPreviewConfig = (
+  value: unknown,
+): value is PermissionPreviewConfig => {
+  const candidate = value as Partial<PermissionPreviewConfig> | null;
+  return Boolean(
+    candidate &&
+      Array.isArray(candidate.roles) &&
+      Array.isArray(candidate.moduleAccess) &&
+      Array.isArray(candidate.workflowAccess) &&
+      Array.isArray(candidate.objectScopes) &&
+      Array.isArray(candidate.tenantScopes) &&
+      Array.isArray(candidate.adminRights),
+  );
+};
+
+export const loadMockPermissionConfig = (): PermissionPreviewConfig => {
+  if (!isBrowserStorageAvailable()) {
+    return clonePermissionPreviewConfig(defaultPermissionPreviewConfig);
+  }
+
+  try {
+    const raw = window.localStorage.getItem(MOCK_PERMISSION_CONFIG_STORAGE_KEY);
+    if (!raw) return clonePermissionPreviewConfig(defaultPermissionPreviewConfig);
+
+    const parsed = JSON.parse(raw);
+    if (!isPermissionPreviewConfig(parsed)) {
+      return clonePermissionPreviewConfig(defaultPermissionPreviewConfig);
+    }
+
+    return parsed;
+  } catch {
+    return clonePermissionPreviewConfig(defaultPermissionPreviewConfig);
+  }
+};
+
+export const saveMockPermissionConfig = (
+  config: PermissionPreviewConfig,
+): void => {
+  if (!isBrowserStorageAvailable()) return;
+  window.localStorage.setItem(
+    MOCK_PERMISSION_CONFIG_STORAGE_KEY,
+    JSON.stringify(config),
+  );
+};
+
+export const resetMockPermissionConfig = (): PermissionPreviewConfig => {
+  if (isBrowserStorageAvailable()) {
+    window.localStorage.removeItem(MOCK_PERMISSION_CONFIG_STORAGE_KEY);
+  }
+
+  return clonePermissionPreviewConfig(defaultPermissionPreviewConfig);
+};
+
+const resolvePermissionPreviewConfig = (
+  permissionsConfig?: PermissionPreviewConfig,
+): PermissionPreviewConfig =>
+  permissionsConfig || loadMockPermissionConfig();
 
 export const isResolverEnforcedModuleTarget = (
   targetId?: string,
@@ -273,14 +374,15 @@ const getScopeLabel = (objectScopes: ObjectScopePermission[]) => {
 // Preview-only additive role resolver. Enforcement not enabled yet.
 export const resolveEffectivePermissionPreview = (
   user: Pick<User, "role" | "assignedRoleIds"> | Partial<User>,
-  permissionsConfig: PermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): EffectivePermissionPreview => {
-  const assignedRoles = resolveUserAssignedRoles(user, permissionsConfig.roles);
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
+  const assignedRoles = resolveUserAssignedRoles(user, effectiveConfig.roles);
   const assignedRoleIds = assignedRoles.map((role) => role.id);
-  const objectScopes = permissionsConfig.objectScopes.filter((scope) =>
+  const objectScopes = effectiveConfig.objectScopes.filter((scope) =>
     assignedRoleIds.includes(scope.roleId),
   );
-  const tenantScopes = permissionsConfig.tenantScopes.filter((scope) =>
+  const tenantScopes = effectiveConfig.tenantScopes.filter((scope) =>
     assignedRoleIds.includes(scope.roleId),
   );
   const tenantScopeLabel =
@@ -292,17 +394,17 @@ export const resolveEffectivePermissionPreview = (
     assignedRoleIds,
     moduleAccess: aggregateModuleAccess(
       assignedRoleIds,
-      permissionsConfig.moduleAccess,
+      effectiveConfig.moduleAccess,
     ),
     workflowAccess: aggregateWorkflowAccess(
       assignedRoleIds,
-      permissionsConfig.workflowAccess,
+      effectiveConfig.workflowAccess,
     ),
     objectScopes,
     tenantScopes,
     adminRights: aggregateAdminRights(
       assignedRoleIds,
-      permissionsConfig.adminRights,
+      effectiveConfig.adminRights,
     ),
     scopeLabel: getScopeLabel(objectScopes),
     tenantScopeLabel,
@@ -312,8 +414,9 @@ export const resolveEffectivePermissionPreview = (
 // Preview-only additive role resolver. Enforcement not enabled yet.
 export const getEffectiveRoles = (
   user: Pick<User, "role" | "assignedRoleIds"> | Partial<User>,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
-): PermissionRole[] => resolveUserAssignedRoles(user, permissionsConfig.roles);
+  permissionsConfig?: PermissionPreviewConfig,
+): PermissionRole[] =>
+  resolveUserAssignedRoles(user, resolvePermissionPreviewConfig(permissionsConfig).roles);
 
 const toLegacyPermissionSubject = (
   user: Pick<User, "id" | "name" | "role" | "permissions" | "modulePermissions">,
@@ -360,18 +463,19 @@ export const canAccessModuleResolver = (
     assignedRoleIds?: string[];
   }) | null | undefined,
   moduleId?: string,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const legacyAllowed = canAccessModule(user, moduleId);
   if (!user || !moduleId) return legacyAllowed;
   if (user.role === "SUPER_ADMIN") return true;
-  if (!hasResolverModuleConfig(moduleId, permissionsConfig)) {
+  if (!hasResolverModuleConfig(moduleId, effectiveConfig)) {
     return legacyAllowed;
   }
 
   const preview = resolveEffectivePermissionPreview(
     toResolverSubject(user),
-    permissionsConfig,
+    effectiveConfig,
   );
   const resolverAccess = preview.moduleAccess.find(
     (access) => access.moduleId === moduleId,
@@ -388,15 +492,16 @@ export const canSeeSidebarModuleResolver = (
   }) | null | undefined,
   moduleId?: string,
   hidden?: boolean,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const legacyAllowed = canSeeSidebarModule(user, moduleId, hidden);
-  if (!moduleId || !hasResolverModuleConfig(moduleId, permissionsConfig)) {
+  if (!moduleId || !hasResolverModuleConfig(moduleId, effectiveConfig)) {
     return legacyAllowed;
   }
   if (hidden && user?.role !== "SUPER_ADMIN") return false;
 
-  return canAccessModuleResolver(user, moduleId, permissionsConfig);
+  return canAccessModuleResolver(user, moduleId, effectiveConfig);
 };
 
 export const canAccessAdminTabResolver = (
@@ -404,11 +509,12 @@ export const canAccessAdminTabResolver = (
     assignedRoleIds?: string[];
   }) | null | undefined,
   adminTabId: AdminModuleTabId,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): boolean => {
-  if (!hasResolverModuleConfig(adminTabId, permissionsConfig)) return true;
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
+  if (!hasResolverModuleConfig(adminTabId, effectiveConfig)) return true;
 
-  return canAccessModuleResolver(user, adminTabId, permissionsConfig);
+  return canAccessModuleResolver(user, adminTabId, effectiveConfig);
 };
 
 export const canAccessRouteResolver = (
@@ -416,40 +522,42 @@ export const canAccessRouteResolver = (
     assignedRoleIds?: string[];
   }) | null | undefined,
   pathname: string,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const legacyAllowed = canAccessRoute(user, pathname);
   const route = getRouteMatch(pathname);
   if (!route) return legacyAllowed;
 
   const targetId =
-    route.adminTabId && hasResolverModuleConfig(route.adminTabId, permissionsConfig)
+    route.adminTabId && hasResolverModuleConfig(route.adminTabId, effectiveConfig)
       ? route.adminTabId
       : route.moduleId;
-  if (!hasResolverModuleConfig(targetId, permissionsConfig)) {
+  if (!hasResolverModuleConfig(targetId, effectiveConfig)) {
     return legacyAllowed;
   }
 
-  return canAccessModuleResolver(user, targetId, permissionsConfig);
+  return canAccessModuleResolver(user, targetId, effectiveConfig);
 };
 
 export const getFirstAllowedRoute = (
   user: (Pick<AuthUser, "role" | "modulePermissions"> & {
     assignedRoleIds?: string[];
   }) | null | undefined,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): string => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const visibleModuleRoute = moduleRegistry
     .filter((module) => module.sidebarVisibility === "visible")
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .find((module) =>
-      canAccessRouteResolver(user, `/${module.route}`, permissionsConfig),
+      canAccessRouteResolver(user, `/${module.route}`, effectiveConfig),
     );
 
   if (visibleModuleRoute) return `/${visibleModuleRoute.route}`;
 
   const allowedRoute = routeRegistry.find((route) =>
-    canAccessRouteResolver(user, route.path, permissionsConfig),
+    canAccessRouteResolver(user, route.path, effectiveConfig),
   );
 
   return allowedRoute?.path || "/darbai";
@@ -603,18 +711,19 @@ const hasResolverWorkflowConfig = (
 export const canViewWorkflowResolver = (
   user: WorkflowPermissionSubject | null | undefined,
   workflow: WorkflowType,
-  permissionsConfig: PermissionPreviewConfig = defaultPermissionPreviewConfig,
+  permissionsConfig?: PermissionPreviewConfig,
 ): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   if (!user) return false;
 
   const legacyAllowed = canLegacyViewWorkflow(user, workflow);
   const normalizedRole = normalizePermissionRole(user.role);
   if (normalizedRole === "SUPER_ADMIN") return true;
-  if (!hasResolverWorkflowConfig(workflow.id, permissionsConfig)) {
+  if (!hasResolverWorkflowConfig(workflow.id, effectiveConfig)) {
     return legacyAllowed;
   }
 
-  const preview = getWorkflowPermissionPreview(user, permissionsConfig);
+  const preview = getWorkflowPermissionPreview(user, effectiveConfig);
   if (preview.assignedRoles.some((role) => role.name === "SUPER_ADMIN")) {
     return true;
   }
@@ -626,6 +735,485 @@ export const canViewWorkflowResolver = (
   if (!preview.assignedRoles.length || !resolverAccess) return legacyAllowed;
 
   return resolverAccess.canView;
+};
+
+const getPreviewForAction = (
+  user: WorkflowPermissionSubject | null | undefined,
+  permissionsConfig: PermissionPreviewConfig,
+): Pick<EffectivePermissionPreview, "assignedRoles" | "moduleAccess" | "workflowAccess" | "adminRights"> => {
+  if (!user) {
+    return {
+      assignedRoles: [],
+      moduleAccess: [],
+      workflowAccess: [],
+      adminRights: emptyAdminRights(),
+    };
+  }
+
+  const workflowPreview = getWorkflowPermissionPreview(user, permissionsConfig);
+  const fullPreview = resolveEffectivePermissionPreview(user, permissionsConfig);
+  return {
+    assignedRoles: workflowPreview.assignedRoles,
+    workflowAccess: workflowPreview.workflowAccess,
+    moduleAccess: fullPreview.moduleAccess,
+    adminRights: fullPreview.adminRights,
+  };
+};
+
+const hasSuperAdminPreviewRole = (
+  user: WorkflowPermissionSubject | null | undefined,
+  preview: Pick<EffectivePermissionPreview, "assignedRoles">,
+) =>
+  Boolean(
+    user &&
+      (normalizePermissionRole(user.role) === "SUPER_ADMIN" ||
+        preview.assignedRoles.some((role) => role.name === "SUPER_ADMIN")),
+  );
+
+const getWorkflowActionAccess = (
+  user: WorkflowPermissionSubject | null | undefined,
+  workflowTypeId: string | undefined,
+  permission: keyof Pick<
+    WorkflowAccessPermission,
+    "canCreate" | "canTransition" | "canClose" | "canApprove" | "canView"
+  >,
+  permissionsConfig: PermissionPreviewConfig,
+): boolean => {
+  const preview = getPreviewForAction(user, permissionsConfig);
+  if (hasSuperAdminPreviewRole(user, preview)) return true;
+  if (!workflowTypeId) return false;
+
+  return Boolean(
+    preview.workflowAccess.find(
+      (access) => access.workflowTypeId === workflowTypeId,
+    )?.[permission],
+  );
+};
+
+const getModuleActionAccess = (
+  user: WorkflowPermissionSubject | null | undefined,
+  moduleId: string | undefined,
+  permission: keyof Pick<
+    ModuleAccessPermission,
+    "canCreate" | "canEdit" | "canAdmin" | "canView"
+  >,
+  permissionsConfig: PermissionPreviewConfig,
+): boolean => {
+  const preview = getPreviewForAction(user, permissionsConfig);
+  if (hasSuperAdminPreviewRole(user, preview)) return true;
+  if (!moduleId) return false;
+
+  return Boolean(
+    preview.moduleAccess.find((access) => access.moduleId === moduleId)?.[
+      permission
+    ],
+  );
+};
+
+const getCardWorkflowTypeId = (card: { workflowTypeId?: string }) =>
+  card.workflowTypeId;
+
+const getCardModuleId = (card: {
+  moduleId?: string;
+  type?: string;
+  entityType?: string;
+}) => {
+  if (card.moduleId) return card.moduleId;
+  if (card.type === "ORDER" || card.entityType === "order") return "orders";
+  return "darbai";
+};
+
+// Preview-only action permission helpers. Enforcement not enabled yet.
+export const canCreateWorkflowCardPreview = (
+  user: WorkflowPermissionSubject | null | undefined,
+  workflowTypeId: string,
+  moduleId = "darbai",
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean =>
+  getModuleActionAccess(user, moduleId, "canCreate", resolvePermissionPreviewConfig(permissionsConfig)) &&
+  getWorkflowActionAccess(
+    user,
+    workflowTypeId,
+    "canCreate",
+    resolvePermissionPreviewConfig(permissionsConfig),
+  );
+
+export const canCreateWorkflowCardResolver = (
+  user: WorkflowPermissionSubject | null | undefined,
+  workflowTypeId: string,
+  moduleId = "darbai",
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
+  if (!user) return false;
+
+  const normalizedRole = normalizePermissionRole(user.role);
+  if (normalizedRole === "SUPER_ADMIN") return true;
+
+  const legacyAllowed =
+    canAccessModule(
+      {
+        role: user.role as AuthUser["role"],
+        modulePermissions:
+          (user as { modulePermissions?: ModulePermission[] }).modulePermissions ||
+          getDefaultModulePermissions(user.role),
+      },
+    moduleId,
+  );
+
+  if (
+    !hasResolverModuleConfig(moduleId, effectiveConfig) ||
+    !hasResolverWorkflowConfig(workflowTypeId, effectiveConfig)
+  ) {
+    return legacyAllowed;
+  }
+
+  const preview = getPreviewForAction(user, effectiveConfig);
+  if (hasSuperAdminPreviewRole(user, preview)) return true;
+  if (!preview.assignedRoles.length) return legacyAllowed;
+
+  const moduleAccess = preview.moduleAccess.find(
+    (access) => access.moduleId === moduleId,
+  );
+  const workflowAccess = preview.workflowAccess.find(
+    (access) => access.workflowTypeId === workflowTypeId,
+  );
+
+  if (!moduleAccess || !workflowAccess) return legacyAllowed;
+  return moduleAccess.canCreate && workflowAccess.canCreate;
+};
+
+export const canEditWorkflowCardPreview = (
+  user: WorkflowPermissionSubject | null | undefined,
+  card: { workflowTypeId?: string; moduleId?: string; type?: string; entityType?: string },
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
+  const workflowTypeId = getCardWorkflowTypeId(card);
+  return (
+    getModuleActionAccess(
+      user,
+      getCardModuleId(card),
+      "canEdit",
+      effectiveConfig,
+    ) &&
+    (!workflowTypeId ||
+      getWorkflowActionAccess(user, workflowTypeId, "canView", effectiveConfig))
+  );
+};
+
+export const canTransitionWorkflowCardPreview = (
+  user: WorkflowPermissionSubject | null | undefined,
+  card: { workflowTypeId?: string },
+  _fromStatus: string,
+  _toStatus: string,
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean =>
+  getWorkflowActionAccess(
+    user,
+    getCardWorkflowTypeId(card),
+    "canTransition",
+    resolvePermissionPreviewConfig(permissionsConfig),
+  );
+
+export const canCloseWorkflowCardPreview = (
+  user: WorkflowPermissionSubject | null | undefined,
+  card: { workflowTypeId?: string },
+  _terminalStatus: string,
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean =>
+  getWorkflowActionAccess(
+    user,
+    getCardWorkflowTypeId(card),
+    "canClose",
+    resolvePermissionPreviewConfig(permissionsConfig),
+  );
+
+export const canApproveWorkflowItemPreview = (
+  user: WorkflowPermissionSubject | null | undefined,
+  item: { workflowTypeId?: string; moduleId?: string; type?: string; entityType?: string },
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
+  const workflowTypeId = getCardWorkflowTypeId(item);
+  if (workflowTypeId) {
+    return getWorkflowActionAccess(
+      user,
+      workflowTypeId,
+      "canApprove",
+      effectiveConfig,
+    );
+  }
+
+  return getModuleActionAccess(
+    user,
+    getCardModuleId(item),
+    "canAdmin",
+    effectiveConfig,
+  );
+};
+
+export const canEditAdminConfigPreview = (
+  user: WorkflowPermissionSubject | null | undefined,
+  configArea: keyof Omit<AdminRightsPermission, "roleId"> | string,
+  permissionsConfig?: PermissionPreviewConfig,
+): boolean => {
+  const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
+  const preview = getPreviewForAction(user, effectiveConfig);
+  if (hasSuperAdminPreviewRole(user, preview)) return true;
+
+  if (configArea in preview.adminRights) {
+    return Boolean(
+      preview.adminRights[configArea as keyof Omit<AdminRightsPermission, "roleId">],
+    );
+  }
+
+  return getModuleActionAccess(user, configArea, "canAdmin", effectiveConfig);
+};
+
+const isLegacyOpsAdmin = (role: string | undefined) => {
+  const normalizedRole = normalizePermissionRole(role);
+  return (
+    normalizedRole === "SUPER_ADMIN" ||
+    normalizedRole === "ADMIN" ||
+    normalizedRole === "OPS"
+  );
+};
+
+const createActionComparison = ({
+  user,
+  action,
+  targetId,
+  targetLabel,
+  legacyAllowed,
+  resolverAllowed,
+}: {
+  user: Pick<User, "id" | "name">;
+  action: ActionPermissionType;
+  targetId: string;
+  targetLabel: string;
+  legacyAllowed: boolean;
+  resolverAllowed: boolean;
+}): ActionPermissionComparison => ({
+  userId: user.id,
+  userName: user.name,
+  action,
+  targetId,
+  targetLabel,
+  legacyAllowed,
+  resolverAllowed,
+  noEnforcement: true,
+  mismatch: legacyAllowed !== resolverAllowed,
+});
+
+// Preview-only action permission shadow comparison. Enforcement not enabled yet.
+export const compareLegacyVsResolverActionAccess = (
+  user: Pick<User, "id" | "name" | "role" | "assignedRoleIds">,
+  workflows: WorkflowType[],
+  permissionsConfig: PermissionPreviewConfig,
+): ActionPermissionComparison[] => {
+  const normalizedRole = normalizePermissionRole(user.role);
+  const activeWorkflow = workflows[0];
+  const activeWorkflowId = activeWorkflow?.id || "unknown-workflow";
+  const activeWorkflowLabel =
+    activeWorkflow?.label || activeWorkflow?.name || activeWorkflowId;
+  const sampleCard = {
+    workflowTypeId: activeWorkflowId,
+    moduleId: "darbai",
+  };
+  const legacyWorkflowVisible = activeWorkflow
+    ? canLegacyViewWorkflow(user, activeWorkflow)
+    : false;
+  const legacyEditAllowed =
+    isLegacyOpsAdmin(user.role) || normalizedRole === "COORDINATOR";
+
+  const comparisons: ActionPermissionComparison[] = workflows.flatMap(
+    (workflow) =>
+      [
+        createActionComparison({
+          user,
+          action: "workflow-card-create",
+          targetId: workflow.id,
+          targetLabel: workflow.label || workflow.name,
+          legacyAllowed: canLegacyViewWorkflow(user, workflow),
+          resolverAllowed: canCreateWorkflowCardPreview(
+            user,
+            workflow.id,
+            "darbai",
+            permissionsConfig,
+          ),
+        }),
+      ],
+  );
+
+  comparisons.push(
+    createActionComparison({
+      user,
+      action: "workflow-card-edit",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} card edit`,
+      legacyAllowed: legacyEditAllowed || legacyWorkflowVisible,
+      resolverAllowed: canEditWorkflowCardPreview(
+        user,
+        sampleCard,
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "assignee-change",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} assignee change`,
+      legacyAllowed: legacyEditAllowed,
+      resolverAllowed: canEditWorkflowCardPreview(
+        user,
+        sampleCard,
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "comments-edit-delete",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} comments edit/delete`,
+      legacyAllowed: legacyWorkflowVisible,
+      resolverAllowed: canEditWorkflowCardPreview(
+        user,
+        sampleCard,
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "checklist-edit",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} checklist edit`,
+      legacyAllowed: legacyWorkflowVisible,
+      resolverAllowed: canEditWorkflowCardPreview(
+        user,
+        sampleCard,
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "kanban-drag-drop",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} Kanban drag/drop`,
+      legacyAllowed: legacyWorkflowVisible,
+      resolverAllowed: canTransitionWorkflowCardPreview(
+        user,
+        sampleCard,
+        "new",
+        "in_progress",
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "status-dropdown",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} status dropdown`,
+      legacyAllowed: legacyWorkflowVisible,
+      resolverAllowed: canTransitionWorkflowCardPreview(
+        user,
+        sampleCard,
+        "new",
+        "in_progress",
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "waiting-modal",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} Laukiama modal`,
+      legacyAllowed: legacyWorkflowVisible,
+      resolverAllowed: canTransitionWorkflowCardPreview(
+        user,
+        sampleCard,
+        "in_progress",
+        "waiting_details",
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "workflow-card-close",
+      targetId: activeWorkflowId,
+      targetLabel: `${activeWorkflowLabel} Atlikta / Atmesta`,
+      legacyAllowed: isLegacyOpsAdmin(user.role),
+      resolverAllowed: canCloseWorkflowCardPreview(
+        user,
+        sampleCard,
+        "fixed",
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "orders-create",
+      targetId: "orders",
+      targetLabel: "Orders create",
+      legacyAllowed: canAccessModule(
+        toLegacyPermissionSubject({
+          ...user,
+          permissions: undefined,
+          modulePermissions: undefined,
+        }),
+        "orders",
+      ),
+      resolverAllowed: canCreateWorkflowCardPreview(
+        user,
+        "orders",
+        "orders",
+        permissionsConfig,
+      ),
+    }),
+    createActionComparison({
+      user,
+      action: "workflow-item-approve",
+      targetId: "orders",
+      targetLabel: "Orders approve",
+      legacyAllowed: isLegacyOpsAdmin(user.role),
+      resolverAllowed: canApproveWorkflowItemPreview(
+        user,
+        { workflowTypeId: "orders", moduleId: "orders", type: "ORDER" },
+        permissionsConfig,
+      ),
+    }),
+  );
+
+  const adminConfigAreas: Array<{
+    id: keyof Omit<AdminRightsPermission, "roleId">;
+    label: string;
+  }> = [
+    { id: "canManageUsers", label: "Users admin config" },
+    { id: "canManageRoles", label: "Roles admin config" },
+    { id: "canManageWorkflowTypes", label: "Workflow Types config" },
+    { id: "canManageSLA", label: "SLA config" },
+    { id: "canManageAutomations", label: "Periodic automations config" },
+    { id: "canManageIntegrations", label: "Integrations config" },
+  ];
+
+  adminConfigAreas.forEach((area) => {
+    comparisons.push(
+      createActionComparison({
+        user,
+        action: "admin-config-edit",
+        targetId: area.id,
+        targetLabel: area.label,
+        legacyAllowed: isLegacyOpsAdmin(user.role),
+        resolverAllowed: canEditAdminConfigPreview(
+          user,
+          area.id,
+          permissionsConfig,
+        ),
+      }),
+    );
+  });
+
+  return comparisons;
 };
 
 const createWorkflowComparison = ({

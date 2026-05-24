@@ -9,7 +9,7 @@ import {
   normalizePermissionRole,
 } from "../logic/permissionEngine";
 import {
-  defaultPermissionPreviewConfig,
+  loadMockPermissionConfig,
   resolveEffectivePermissionPreview,
 } from "../logic/permissionPreviewResolver";
 import { readMockStorage, writeMockStorage } from "../logic/mockDbHydration";
@@ -100,7 +100,7 @@ const hydrateAdditiveRoleSession = (
       role: (sourceUser?.role || authUser.role) as User["role"],
       assignedRoleIds: sourceUser?.assignedRoleIds || authUser.assignedRoleIds,
     },
-    defaultPermissionPreviewConfig,
+    loadMockPermissionConfig(),
   );
   const tenantIds = Array.from(
     new Set(preview.tenantScopes.flatMap((scope) => scope.tenantIds)),

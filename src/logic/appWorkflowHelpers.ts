@@ -196,6 +196,7 @@ export const getScopedEntities = (
   tasks: Fault[],
   currentUser: User,
   selectedRegion: string,
+  clubs: Club[],
 ): Fault[] => {
   const entityMap = new Map<string, Fault>();
   faults.forEach((fault) => {
@@ -205,7 +206,12 @@ export const getScopedEntities = (
     if (task && task.id) entityMap.set(task.id, task);
   });
 
-  return getScopedFaults(Array.from(entityMap.values()), currentUser, selectedRegion);
+  return getScopedFaults(
+    Array.from(entityMap.values()),
+    currentUser,
+    selectedRegion,
+    clubs,
+  );
 };
 
 export const splitScopedEntities = (
@@ -222,14 +228,13 @@ export interface FilterBoardEntitiesParams {
   clubs: Club[];
   getRemainingTime: (fault: Fault) => { overdue: boolean; text: string };
   slaFilter: string;
-  typeFilters: string[];
   sourceFilter: string;
   appUsers: User[];
   currentUser: WorkflowVisibilityUser;
   assigneeFilter: string;
   quickFilter: string;
   periodicFilter: "ALL" | "PERIODIC" | "SIMPLE";
-  clubFilter: string;
+  clubFilter: string[];
   selectedWorkflowTypeIds?: string[];
   permittedWorkflowTypeIds?: string[];
 }
@@ -241,7 +246,6 @@ export const filterBoardEntities = ({
   clubs,
   getRemainingTime,
   slaFilter,
-  typeFilters,
   sourceFilter,
   appUsers,
   currentUser,
@@ -277,15 +281,6 @@ export const filterBoardEntities = ({
     const isNear =
       !isDelayed && sla.text.includes("h") && parseInt(sla.text) < 24;
 
-    const matchesType =
-      typeFilters.length === 0
-        ? true
-        : typeFilters.some(
-            (filter) =>
-              filter === fault.type ||
-              filter === fault.category ||
-              filter === fault.workflowTypeId,
-          );
     const source = fault.source || "USER";
     const matchesSource = sourceFilter === "ALL" || source === sourceFilter;
 
@@ -304,20 +299,20 @@ export const filterBoardEntities = ({
       (assigneeFilter === "MINE" &&
         (assignedToId === currentUser.id ||
           assignedToName === currentUser.name)) ||
-      (assigneeFilter === "OPS" &&
-        (assignedToName === "OPS" || assignedToId === "OPS")) ||
+      (assigneeFilter === "UNASSIGNED" && !assignedToId && !assignedToName) ||
       assignedToId === assigneeFilter ||
       assignedToName === assigneeFilter;
 
-    const mineQuickMatch =
-      assignedToId === currentUser.id || assignedToName === currentUser.name;
+    const normalizedQuickFilter = ["all", "delayed", "near"].includes(
+      quickFilter,
+    )
+      ? quickFilter
+      : "all";
 
     const matchesQuick =
-      quickFilter === "all" ||
-      (quickFilter === "mine" && mineQuickMatch) ||
-      (quickFilter === "delayed" && isDelayed) ||
-      (quickFilter === "near" && isNear) ||
-      (quickFilter === "priority" && fault.priority === "critical");
+      normalizedQuickFilter === "all" ||
+      (normalizedQuickFilter === "delayed" && isDelayed) ||
+      (normalizedQuickFilter === "near" && isNear);
 
     const matchesPeriodic =
       periodicFilter === "ALL" ||
@@ -339,7 +334,6 @@ export const filterBoardEntities = ({
       matchesSearch &&
       matchesSla &&
       matchesQuick &&
-      matchesType &&
       matchesSource &&
       matchesAssignee &&
       matchesPeriodic &&
@@ -347,12 +341,11 @@ export const filterBoardEntities = ({
     );
   });
 
-  return filterFaults(filtered, "all", clubFilter);
+  return filterFaults(filtered, "all", clubFilter, clubs);
 };
 
 export const getActiveDarbaiWorkflowIds = (
   workflowTypes: WorkflowType[],
-  typeFilters: string[],
   selectedWorkflowTypeIds: string[] = [],
   currentUser?: WorkflowVisibilityUser,
 ): string[] =>
@@ -365,11 +358,7 @@ export const getActiveDarbaiWorkflowIds = (
       if (selectedWorkflowTypeIds.length > 0) {
         return selectedWorkflowTypeIds.includes(workflow.id);
       }
-      if (typeFilters.length === 0) return true;
-      return typeFilters.some(
-        (filter) =>
-          filter === workflow.id || filter === workflow.legacyCategory,
-      );
+      return true;
     })
     .map((workflow) => workflow.id);
 

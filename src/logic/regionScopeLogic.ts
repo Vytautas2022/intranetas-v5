@@ -1,12 +1,17 @@
 import { Fault } from "../types/faults";
 import { User } from "../mock-db/users";
-import { clubs } from "../mock-db/clubs";
+import { Club, clubs } from "../mock-db/clubs";
 
-export function getScopedFaults(faults: Fault[], user: User, selectedRegion: string): Fault[] {
+export function getScopedFaults(
+  faults: Fault[],
+  user: User,
+  selectedRegion: string,
+  clubsSource: Club[] = clubs,
+): Fault[] {
   // Coordinator → always restricted
   if (user.role === "COORDINATOR") {
     return faults.filter(f => {
-      const club = clubs.find(c => c.id === f.clubId);
+      const club = clubsSource.find(c => c.id === f.clubId);
       return club?.region === user.region;
     });
   }
@@ -18,7 +23,7 @@ export function getScopedFaults(faults: Fault[], user: User, selectedRegion: str
     }
 
     return faults.filter(f => {
-      const club = clubs.find(c => c.id === f.clubId);
+      const club = clubsSource.find(c => c.id === f.clubId);
       return club?.region === selectedRegion;
     });
   }
