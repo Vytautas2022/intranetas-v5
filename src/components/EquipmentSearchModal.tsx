@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 import { Fault } from '../mock-db/faults';
 import { Status } from '../types/faults';
 import { getPriorityColor, getPriorityLabel } from '../logic/faultLogic';
+import { getFaultEquipmentId } from '../logic/equipmentFaultIdentity';
 
 interface Props {
   isOpen: boolean;
@@ -38,7 +39,7 @@ export const EquipmentSearchModal = ({ isOpen, onClose, faults, onAddComment, on
     if (!selectedEquipment) return null;
     return faults.find(
       (t) =>
-        t.equipment_id === selectedEquipment.id &&
+        getFaultEquipmentId(t) === selectedEquipment.id &&
         t.category === 'EQUIPMENT_FAULT' &&
         t.status !== Status.FIXED &&
         t.status !== Status.REJECTED
@@ -122,7 +123,7 @@ export const EquipmentSearchModal = ({ isOpen, onClose, faults, onAddComment, on
                       filteredEquipment.map((eq) => {
                          const hasActive = faults.some(
                           (t) =>
-                            t.equipment_id === eq.id &&
+                            getFaultEquipmentId(t) === eq.id &&
                             t.category === 'EQUIPMENT_FAULT' &&
                             t.status !== Status.FIXED &&
                             t.status !== Status.REJECTED

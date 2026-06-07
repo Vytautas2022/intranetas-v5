@@ -12,6 +12,7 @@ import { users, User } from "../../mock-db/users";
 import { clubs, Club } from "../../mock-db/clubs";
 import { equipmentList, equipmentIssueTypesList } from "../../mock-db/admin";
 import { RichTextEditor } from "../../components/ui/RichTextEditor";
+import { getAssignableUsersForClub } from "../../logic/userScopeLogic";
 import {
   periodicTaskInstances,
   PeriodicTaskInstance,
@@ -57,41 +58,17 @@ const AssigneeDropdown = ({
 
   const selectedClub = clubs.find((c) => c.id === selectedClubId);
 
-  const filteredUsers = users.filter((u) => {
-    const roleMatches = [
-      "COORDINATOR",
-      "OPS",
-      "ACCOUNTING",
-      "CS",
-    ].includes(u.role);
-    let cityMatches = true;
-    if (selectedClub && selectedClub.city && u.region && u.region !== "ALL") {
-      cityMatches = u.region === selectedClub.city;
-    }
-    const nameMatches = u.name.toLowerCase().includes(searchTerm.toLowerCase());
-    return selectedClub
-      ? roleMatches && cityMatches && nameMatches
-      : nameMatches;
-  });
+  const scopedUsers = selectedClub
+    ? getAssignableUsersForClub(users, selectedClub)
+    : users.filter((u) => u.is_active !== false);
+  const filteredUsers = scopedUsers.filter((u) =>
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
 
   const selectedUser = users.find((u) => u.id === selectedUserId);
 
   const groups = {
-    Koordinatoriai: filteredUsers.filter(
-      (u) => u.role === "COORDINATOR",
-    ),
-    OPS: filteredUsers.filter((u) => u.role === "OPS"),
-    Buhalterija: filteredUsers.filter((u) => u.role === "ACCOUNTING"),
-    "Klientų aptarnavimas": filteredUsers.filter((u) => u.role === "CS"),
-    Kiti: selectedClub
-      ? []
-      : users.filter(
-          (u) =>
-            u.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-            !["COORDINATOR", "OPS", "ACCOUNTING", "CS"].includes(
-              u.role,
-            ),
-        ),
+    Kiti: filteredUsers,
   };
 
   return (

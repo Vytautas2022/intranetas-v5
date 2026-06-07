@@ -1,3 +1,5 @@
+import { workflowTypes } from "./workflowTypes";
+
 export type ObjectScopeType = "ALL" | "REGION" | "CLUBS" | "OWN_ONLY";
 
 export interface PermissionRole {
@@ -63,16 +65,7 @@ const currentModuleIds = [
   "workflow_types",
 ];
 
-const currentWorkflowTypeIds = [
-  "facility-work",
-  "equipment-work",
-  "it-work",
-  "marketing-work",
-  "sop-work",
-  "video-control",
-  "orders",
-  "suggestions",
-];
+const currentWorkflowTypeIds = workflowTypes.map((workflow) => workflow.id);
 
 export const permissionRoles: PermissionRole[] = [
   {
@@ -194,20 +187,20 @@ const createWorkflowAccess = (
     ...permissions,
   }));
 
-const createWorkflowAccessById = (
+const createWorkflowAccessByLegacyCategory = (
   roleId: string,
-  workflowPermissions: Record<string, Partial<WorkflowAccessPermission>>,
+  legacyCategoryPermissions: Record<string, Partial<WorkflowAccessPermission>>,
 ): WorkflowAccessPermission[] =>
-  currentWorkflowTypeIds.map((workflowTypeId) => ({
+  workflowTypes.map((workflow) => ({
     roleId,
-    workflowTypeId,
+    workflowTypeId: workflow.id,
     canView: false,
     canCreate: false,
     canTransition: false,
     canClose: false,
     canApprove: false,
     canViewAnalytics: false,
-    ...(workflowPermissions[workflowTypeId] || {}),
+    ...(legacyCategoryPermissions[workflow.legacyCategory] || {}),
   }));
 
 export const workflowAccessPermissions: WorkflowAccessPermission[] = [
@@ -233,18 +226,18 @@ export const workflowAccessPermissions: WorkflowAccessPermission[] = [
     canTransition: true,
     canClose: true,
   }),
-  ...createWorkflowAccessById("role-coordinator", {
-    "facility-work": {
+  ...createWorkflowAccessByLegacyCategory("role-coordinator", {
+    FACILITY_FAULT: {
       canView: true,
       canCreate: true,
       canTransition: true,
     },
-    "equipment-work": {
+    EQUIPMENT_FAULT: {
       canView: true,
       canCreate: true,
       canTransition: true,
     },
-    "video-control": {
+    VIDEO_CONTROL: {
       canView: true,
       canCreate: true,
       canTransition: true,

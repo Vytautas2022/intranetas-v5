@@ -1,10 +1,32 @@
 import { Fault } from "../mock-db/faults";
+import type { AuthUser } from "../auth/types";
 import { Status } from "../types/faults";
 import { canClosePeriodicTask } from "./periodicActionLogic";
+import {
+  canCloseWorkflowCardPreview,
+  type PermissionPreviewConfig,
+} from "./permissionPreviewResolver";
 
-export function rejectFault(fault: Fault, reason: string, user: { role: string; name: string }): void {
-  if (user.role !== "OPS" && user.role !== "Admin") {
-    throw new Error("Tik OPS vartotojai gali atmesti gedimus");
+type RejectFaultUser = {
+  role: AuthUser["role"];
+  name: string;
+} & Pick<AuthUser, "assignedRoleIds" | "effectiveRoles" | "effectivePermissionsPreview">;
+
+export function rejectFault(
+  fault: Fault,
+  reason: string,
+  user: RejectFaultUser,
+  permissionsConfig?: PermissionPreviewConfig,
+): void {
+  if (
+    !canCloseWorkflowCardPreview(
+      user,
+      { workflowTypeId: (fault as { workflowTypeId?: string }).workflowTypeId },
+      Status.REJECTED,
+      permissionsConfig,
+    )
+  ) {
+    throw new Error("Neturite teisių atmesti gedimo");
   }
 
   if (!reason || reason.trim() === "") {

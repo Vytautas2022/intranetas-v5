@@ -25,6 +25,8 @@ export interface AuthUser {
   email: string;
   role: UserRole;
   assignedRoleIds?: string[];
+  assignedRegionIds?: string[];
+  assignedClubIds?: string[];
   effectiveRoles?: PermissionRole[];
   tenantIds?: string[];
   effectivePermissionsPreview?: {

@@ -10,6 +10,7 @@ import {
   resolvePeriodicDestinationWorkflowTypeId,
   type ResolvePeriodicDestinationWorkflowContext,
 } from './appWorkflowHelpers';
+import { getEquipmentIdentityFields, getFaultEquipmentId } from './equipmentFaultIdentity';
 
 export interface GenerationResult {
   newFaults: Fault[];
@@ -71,7 +72,7 @@ export const generatePeriodicWorksForClub = (
           
           // For equipment faults, also check equipmentId and issueType
           if (template.targetSubmodule === 'EQUIPMENT_FAULT') {
-            const isSameEquipment = f.equipmentId === template.equipmentId;
+            const isSameEquipment = getFaultEquipmentId(f) === template.equipmentId;
             const isSameIssueType = f.issue_type_id === template.issueTypeId || f.typeId === template.issueTypeId;
             return isSameTemplate && isSameClub && isPeriodMatch && isSourceMatch && isSameEquipment && isSameIssueType;
           }
@@ -179,7 +180,7 @@ export const generatePeriodicWorksForClub = (
           assigneeName: template.assignedTo?.name || 'Nepriskirta',
           assignedTo: template.assignedTo?.name || 'Nepriskirta',
           slaHours: finalSla,
-          equipmentId: equipmentId,
+          ...getEquipmentIdentityFields(equipmentId),
           issue_type_id: issueTypeId,
           typeId: issueTypeId, // For compatibility
           history: [

@@ -357,6 +357,10 @@ export interface EquipmentIssueType {
   priority: 'low' | 'medium' | 'high' | 'critical';
   sla_hours: number;
   applies_to?: 'FACILITY' | 'EQUIPMENT' | 'BOTH';
+  is_default?: boolean;
+  isDefault?: boolean;
+  is_active?: boolean;
+  active?: boolean;
 }
 
 export const equipmentIssueTypesList: EquipmentIssueType[] = [

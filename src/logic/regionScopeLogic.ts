@@ -1,6 +1,7 @@
 import { Fault } from "../types/faults";
 import { User } from "../mock-db/users";
 import { Club, clubs } from "../mock-db/clubs";
+import { canUserAccessClub, hasAllRegionScope } from "./userScopeLogic";
 
 export function getScopedFaults(
   faults: Fault[],
@@ -8,25 +9,13 @@ export function getScopedFaults(
   selectedRegion: string,
   clubsSource: Club[] = clubs,
 ): Fault[] {
-  // Coordinator → always restricted
-  if (user.role === "COORDINATOR") {
-    return faults.filter(f => {
-      const club = clubsSource.find(c => c.id === f.clubId);
-      return club?.region === user.region;
-    });
-  }
+  return faults.filter((fault) => {
+    const club = clubsSource.find((candidate) => candidate.id === fault.clubId);
+    if (!canUserAccessClub(user, club)) return false;
 
-  // OPS → full access with optional region filter
-  if (user.role === "OPS") {
-    if (!selectedRegion || selectedRegion === "ALL") {
-      return faults;
-    }
+    if (!selectedRegion || selectedRegion === "ALL") return true;
+    if (!hasAllRegionScope(user) && !canUserAccessClub(user, club)) return false;
 
-    return faults.filter(f => {
-      const club = clubsSource.find(c => c.id === f.clubId);
-      return club?.region === selectedRegion;
-    });
-  }
-
-  return faults;
+    return club?.region === selectedRegion;
+  });
 }

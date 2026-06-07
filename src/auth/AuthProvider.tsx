@@ -225,6 +225,12 @@ const saveAutoApprovedGoogleUser = (
       email: normalizedEmail,
       role: (existingUser?.role || existingUser?.roleId || DEFAULT_GOOGLE_ROLE) as User["role"],
       region: existingUser?.region || "ALL",
+      assignedRegionIds:
+        existingUser?.assignedRegionIds ||
+        (existingUser?.region && existingUser.region !== "ALL"
+          ? [existingUser.region]
+          : ["ALL"]),
+      assignedClubIds: existingUser?.assignedClubIds || existingUser?.assigned_clubs || [],
       assigned_clubs: existingUser?.assigned_clubs || [],
       is_active: true,
       active: true,
@@ -268,6 +274,9 @@ const mapSystemUserToAuthUser = (
 ): AuthUser => {
   const region = user.region || "ALL";
   const role = normalizeRole(user.role || user.roleId) as AuthUser["role"];
+  const assignedRegionIds =
+    user.assignedRegionIds || (region === "ALL" ? ["ALL"] : [region]);
+  const assignedClubIds = user.assignedClubIds || user.assigned_clubs || [];
   const userWithPermissions = ensureModulePermissionsConfig(user);
   const permissions = userWithPermissions.modulePermissions || getDefaultModulePermissions(role);
 
@@ -276,8 +285,10 @@ const mapSystemUserToAuthUser = (
     name: user.name || googleProfile?.name || user.email,
     email: normalizeEmail(user.email),
     role,
+    assignedRegionIds,
+    assignedClubIds,
     region,
-    regionAccess: region === "ALL" ? ["ALL"] : [region],
+    regionAccess: assignedRegionIds,
     modulePermissions: permissions,
     is_active: user.is_active !== false && user.active !== false,
     avatarUrl: googleProfile?.picture,

@@ -444,15 +444,26 @@ const toResolverSubject = (
   assignedRoleIds: user.assignedRoleIds,
 });
 
+const hasAssignedRoleIds = (
+  user:
+    | { assignedRoleIds?: string[] }
+    | null
+    | undefined,
+): boolean => Boolean(user?.assignedRoleIds?.length);
+
+const canUseMigrationFallback = (
+  user:
+    | { assignedRoleIds?: string[] }
+    | null
+    | undefined,
+): boolean => !hasAssignedRoleIds(user);
+
 const canResolverViewModule = (
   user: Pick<User, "role" | "assignedRoleIds"> | Partial<User>,
   module: Pick<ModuleRegistryItem, "moduleId">,
   permissionsConfig: PermissionPreviewConfig,
 ): boolean => {
   const preview = resolveEffectivePermissionPreview(user, permissionsConfig);
-  const roleNames = preview.assignedRoles.map((role) => role.name);
-  if (roleNames.includes("SUPER_ADMIN")) return true;
-
   return preview.moduleAccess.some(
     (access) => access.moduleId === module.moduleId && access.canView,
   );
@@ -467,10 +478,9 @@ export const canAccessModuleResolver = (
 ): boolean => {
   const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const legacyAllowed = canAccessModule(user, moduleId);
-  if (!user || !moduleId) return legacyAllowed;
-  if (user.role === "SUPER_ADMIN") return true;
+  if (!user || !moduleId) return false;
   if (!hasResolverModuleConfig(moduleId, effectiveConfig)) {
-    return legacyAllowed;
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
   }
 
   const preview = resolveEffectivePermissionPreview(
@@ -481,7 +491,9 @@ export const canAccessModuleResolver = (
     (access) => access.moduleId === moduleId,
   );
 
-  if (!preview.assignedRoles.length || !resolverAccess) return legacyAllowed;
+  if (!preview.assignedRoles.length || !resolverAccess) {
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
+  }
 
   return resolverAccess.canView;
 };
@@ -497,9 +509,9 @@ export const canSeeSidebarModuleResolver = (
   const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const legacyAllowed = canSeeSidebarModule(user, moduleId, hidden);
   if (!moduleId || !hasResolverModuleConfig(moduleId, effectiveConfig)) {
-    return legacyAllowed;
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
   }
-  if (hidden && user?.role !== "SUPER_ADMIN") return false;
+  if (hidden) return false;
 
   return canAccessModuleResolver(user, moduleId, effectiveConfig);
 };
@@ -512,7 +524,9 @@ export const canAccessAdminTabResolver = (
   permissionsConfig?: PermissionPreviewConfig,
 ): boolean => {
   const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
-  if (!hasResolverModuleConfig(adminTabId, effectiveConfig)) return true;
+  if (!hasResolverModuleConfig(adminTabId, effectiveConfig)) {
+    return canAccessModuleResolver(user, "admin", effectiveConfig);
+  }
 
   return canAccessModuleResolver(user, adminTabId, effectiveConfig);
 };
@@ -534,7 +548,7 @@ export const canAccessRouteResolver = (
       ? route.adminTabId
       : route.moduleId;
   if (!hasResolverModuleConfig(targetId, effectiveConfig)) {
-    return legacyAllowed;
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
   }
 
   return canAccessModuleResolver(user, targetId, effectiveConfig);
@@ -717,22 +731,19 @@ export const canViewWorkflowResolver = (
   if (!user) return false;
 
   const legacyAllowed = canLegacyViewWorkflow(user, workflow);
-  const normalizedRole = normalizePermissionRole(user.role);
-  if (normalizedRole === "SUPER_ADMIN") return true;
   if (!hasResolverWorkflowConfig(workflow.id, effectiveConfig)) {
-    return legacyAllowed;
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
   }
 
   const preview = getWorkflowPermissionPreview(user, effectiveConfig);
-  if (preview.assignedRoles.some((role) => role.name === "SUPER_ADMIN")) {
-    return true;
-  }
 
   const resolverAccess = preview.workflowAccess.find(
     (access) => access.workflowTypeId === workflow.id,
   );
 
-  if (!preview.assignedRoles.length || !resolverAccess) return legacyAllowed;
+  if (!preview.assignedRoles.length || !resolverAccess) {
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
+  }
 
   return resolverAccess.canView;
 };
@@ -760,16 +771,6 @@ const getPreviewForAction = (
   };
 };
 
-const hasSuperAdminPreviewRole = (
-  user: WorkflowPermissionSubject | null | undefined,
-  preview: Pick<EffectivePermissionPreview, "assignedRoles">,
-) =>
-  Boolean(
-    user &&
-      (normalizePermissionRole(user.role) === "SUPER_ADMIN" ||
-        preview.assignedRoles.some((role) => role.name === "SUPER_ADMIN")),
-  );
-
 const getWorkflowActionAccess = (
   user: WorkflowPermissionSubject | null | undefined,
   workflowTypeId: string | undefined,
@@ -780,7 +781,6 @@ const getWorkflowActionAccess = (
   permissionsConfig: PermissionPreviewConfig,
 ): boolean => {
   const preview = getPreviewForAction(user, permissionsConfig);
-  if (hasSuperAdminPreviewRole(user, preview)) return true;
   if (!workflowTypeId) return false;
 
   return Boolean(
@@ -800,7 +800,6 @@ const getModuleActionAccess = (
   permissionsConfig: PermissionPreviewConfig,
 ): boolean => {
   const preview = getPreviewForAction(user, permissionsConfig);
-  if (hasSuperAdminPreviewRole(user, preview)) return true;
   if (!moduleId) return false;
 
   return Boolean(
@@ -847,9 +846,6 @@ export const canCreateWorkflowCardResolver = (
   const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   if (!user) return false;
 
-  const normalizedRole = normalizePermissionRole(user.role);
-  if (normalizedRole === "SUPER_ADMIN") return true;
-
   const legacyAllowed =
     canAccessModule(
       {
@@ -865,12 +861,13 @@ export const canCreateWorkflowCardResolver = (
     !hasResolverModuleConfig(moduleId, effectiveConfig) ||
     !hasResolverWorkflowConfig(workflowTypeId, effectiveConfig)
   ) {
-    return legacyAllowed;
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
   }
 
   const preview = getPreviewForAction(user, effectiveConfig);
-  if (hasSuperAdminPreviewRole(user, preview)) return true;
-  if (!preview.assignedRoles.length) return legacyAllowed;
+  if (!preview.assignedRoles.length) {
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
+  }
 
   const moduleAccess = preview.moduleAccess.find(
     (access) => access.moduleId === moduleId,
@@ -879,7 +876,9 @@ export const canCreateWorkflowCardResolver = (
     (access) => access.workflowTypeId === workflowTypeId,
   );
 
-  if (!moduleAccess || !workflowAccess) return legacyAllowed;
+  if (!moduleAccess || !workflowAccess) {
+    return canUseMigrationFallback(user) ? legacyAllowed : false;
+  }
   return moduleAccess.canCreate && workflowAccess.canCreate;
 };
 
@@ -960,7 +959,6 @@ export const canEditAdminConfigPreview = (
 ): boolean => {
   const effectiveConfig = resolvePermissionPreviewConfig(permissionsConfig);
   const preview = getPreviewForAction(user, effectiveConfig);
-  if (hasSuperAdminPreviewRole(user, preview)) return true;
 
   if (configArea in preview.adminRights) {
     return Boolean(

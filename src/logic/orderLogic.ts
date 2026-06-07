@@ -1,7 +1,8 @@
 import { Order, OrderStatus, OrderUrgency, OrderCategory } from '../mock-db/orders';
 import { systemSettings } from '../mock-db/settings';
 import { createHistoryItem, addHistoryItem } from './historyLogic';
-import { canApprove, UserRole } from '../types/roles';
+import type { AuthUser } from '../auth/types';
+import { canApproveWorkflowItemPreview } from './permissionPreviewResolver';
 import { resolveAssignee } from './assignmentLogic';
 
 /**
@@ -140,12 +141,21 @@ export const getOrderBudgetVariance = (order: Order): number => {
 /**
  * Checks if the user can approve the order.
  */
-export const canUserApprove = (order: Order, userId: string, userRole: UserRole): boolean => {
-  if (!canApprove(userRole)) return false;
+export const canUserApprove = (
+  order: Order,
+  user: Pick<AuthUser, "id" | "role" | "assignedRoleIds" | "effectiveRoles" | "effectivePermissionsPreview">,
+): boolean => {
+  if (
+    !canApproveWorkflowItemPreview(user, {
+      workflowTypeId: "orders",
+      moduleId: "orders",
+      type: "ORDER",
+    })
+  ) return false;
   if (order.status !== 'PENDING_APPROVAL') return false;
   
   // Prevent self-approval
-  return order.requestedBy !== userId;
+  return order.requestedBy !== user.id;
 };
 
 /**

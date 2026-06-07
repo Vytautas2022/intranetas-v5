@@ -107,6 +107,7 @@ interface AdminModuleProps {
   clubTaskConfigs: any[];
   setClubTaskConfigs: React.Dispatch<React.SetStateAction<any[]>>;
   tasks: any[];
+  orders: any[];
   workflowTypes?: WorkflowType[];
   setWorkflowTypes?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
   renderPeriodicModule?: () => React.ReactNode;
@@ -138,8 +139,8 @@ interface AdminNavigationItem {
 }
 
 const adminNavigationItems: AdminNavigationItem[] = [
-  { id: "clubs", label: "Padaliniai", group: "Organization", icon: MapPin, visibility: "visible" },
   { id: "cities", label: "Miestai / Regionai", group: "Organization", icon: Building, visibility: "visible" },
+  { id: "clubs", label: "Padaliniai", group: "Organization", icon: MapPin, visibility: "visible" },
   { id: "users", label: "Vartotojai", group: "Organization", icon: Users, visibility: "visible" },
   { id: "roles_permissions", label: "Roles & Permissions", group: "Organization", icon: ShieldCheck, visibility: "visible" },
   { id: "workflow_types", label: "Workflow Types", group: "Workflow System", icon: Workflow, visibility: "visible" },
@@ -166,6 +167,87 @@ const visibleAdminNavigationItems = adminNavigationItems.filter(
   (item) => item.visibility === "visible",
 );
 
+function AdminActiveSwitch({
+  active,
+  onClick,
+  className,
+}: {
+  active: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={active}
+      aria-label={`Būsena: ${active ? "Aktyvus" : "Neaktyvus"}`}
+      title={active ? "Aktyvus" : "Neaktyvus"}
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] font-bold transition-colors",
+        active
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-slate-200 bg-slate-50 text-slate-500",
+        className,
+      )}
+    >
+      <span className="min-w-[58px] text-left">
+        {active ? "Aktyvus" : "Neaktyvus"}
+      </span>
+      <span
+        className={cn(
+          "relative h-5 w-9 rounded-full transition-colors",
+          active ? "bg-emerald-500" : "bg-slate-300",
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
+            active ? "translate-x-4" : "translate-x-0.5",
+          )}
+        />
+      </span>
+      <span className="w-6 text-[10px]">{active ? "ON" : "OFF"}</span>
+    </button>
+  );
+}
+
+type LifecycleDependency = {
+  label: string;
+  count: number;
+};
+
+const formatDependencyBlockMessage = (dependencies: LifecycleDependency[]) => {
+  const found = dependencies.filter((dependency) => dependency.count > 0);
+
+  return [
+    "Cannot delete.",
+    "",
+    "Dependencies found:",
+    "",
+    ...found.map((dependency) => `* ${dependency.count} ${dependency.label}`),
+  ].join("\n");
+};
+
+const hasMatchingAssignee = (item: any, user: User) => {
+  const assignedTo = item?.assignedTo;
+  const assignee = item?.assignee;
+
+  return (
+    item?.assigneeId === user.id ||
+    item?.assigned_to === user.id ||
+    item?.assignedBy === user.id ||
+    item?.assigned_by === user.id ||
+    (typeof assignedTo === "string" &&
+      (assignedTo === user.id || assignedTo === user.name)) ||
+    assignedTo?.id === user.id ||
+    (typeof assignee === "string" &&
+      (assignee === user.id || assignee === user.name)) ||
+    assignee?.id === user.id
+  );
+};
+
 export const AdminModule: React.FC<AdminModuleProps> = ({
   products,
   setProducts,
@@ -190,6 +272,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   clubTaskConfigs,
   setClubTaskConfigs,
   tasks,
+  orders,
   workflowTypes = initialWorkflowTypes,
   setWorkflowTypes,
   renderPeriodicModule,
@@ -319,7 +402,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
 
         <div className="flex-1 flex flex-col min-h-0 w-full overflow-visible">
         {path.includes(getTabRoute("cities")) && (
-          <CitiesAdmin cities={cities} setCities={setCities} />
+          <CitiesAdmin cities={cities} setCities={setCities} clubs={clubs} />
         )}
         {path.includes(getTabRoute("users")) && (
           <UsersAdmin
@@ -328,6 +411,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             clubs={clubs}
             permissionRoles={permissionRoles}
             permissionsConfig={permissionPreviewConfig}
+            tasks={tasks}
+            periodicTemplates={periodicTemplates}
           />
         )}
         {path.includes(getTabRoute("roles_permissions")) &&
@@ -345,6 +430,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setTenantScopes={setPermissionTenantScopes}
             adminRights={permissionAdminRights}
             setAdminRights={setPermissionAdminRights}
+            workflows={workflowTypes}
             users={users}
             currentUser={currentUser}
             onResetMockPermissions={handleResetMockPermissions}
@@ -356,6 +442,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setClubs={setClubs}
             cities={cities}
             users={users}
+            equipmentList={equipmentList}
+            tasks={tasks}
+            orders={orders}
             periodicTemplates={periodicTemplates}
             setPeriodicTemplates={setPeriodicTemplates}
           />
@@ -437,6 +526,7 @@ function RolesPermissionsPlaceholder({
   setTenantScopes,
   adminRights,
   setAdminRights,
+  workflows,
   users,
   currentUser,
   onResetMockPermissions,
@@ -455,6 +545,7 @@ function RolesPermissionsPlaceholder({
   setTenantScopes: React.Dispatch<React.SetStateAction<TenantScopePermission[]>>;
   adminRights: AdminRightsPermission[];
   setAdminRights: React.Dispatch<React.SetStateAction<AdminRightsPermission[]>>;
+  workflows: WorkflowType[];
   users: User[];
   currentUser: AuthUser | null;
   onResetMockPermissions: () => void;
@@ -485,9 +576,15 @@ function RolesPermissionsPlaceholder({
   const visibleModules = moduleRegistry
     .filter((module) => module.category !== "hidden")
     .sort((a, b) => a.sortOrder - b.sortOrder);
-  const activeWorkflows = initialWorkflowTypes
-    .filter((workflow) => workflow.active !== false && workflow.enabled !== false)
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const activeWorkflows = useMemo(
+    () =>
+      workflows
+        .filter(
+          (workflow) => workflow.active !== false && workflow.enabled !== false,
+        )
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [workflows],
+  );
   const modulePermissionKeys: Array<{
     key: ModulePermissionKey;
     label: string;
@@ -508,6 +605,9 @@ function RolesPermissionsPlaceholder({
     { key: "canApprove", label: "Approve" },
     { key: "canViewAnalytics", label: "Analytics" },
   ];
+  const visibleWorkflowPermissionKeys = workflowPermissionKeys.filter(
+    (permission) => permission.key !== "canApprove",
+  );
   const adminRightsKeys: Array<{ key: AdminRightsKey; label: string }> = [
     { key: "canManageUsers", label: "Users" },
     { key: "canManageRoles", label: "Roles" },
@@ -594,6 +694,8 @@ function RolesPermissionsPlaceholder({
   });
   const selectedRole =
     roles.find((role) => role.id === selectedRoleId) || roles[0];
+  const getRoleAssignmentCount = (roleId: string) =>
+    users.filter((user) => (user.assignedRoleIds || []).includes(roleId)).length;
 
   const getModuleAccess = (roleId: string, moduleId: string) =>
     moduleAccess.find(
@@ -655,6 +757,34 @@ function RolesPermissionsPlaceholder({
       currentRoles.map((role) =>
         role.id === roleId ? { ...role, ...patch } : role,
       ),
+    );
+  };
+
+  const deleteRole = (role: PermissionRole) => {
+    if (role.systemRole) return;
+
+    if (getRoleAssignmentCount(role.id) > 0) {
+      alert("Role cannot be deleted because it is assigned to users.");
+      return;
+    }
+
+    setRoles((currentRoles) =>
+      currentRoles.filter((currentRole) => currentRole.id !== role.id),
+    );
+    setModuleAccess((currentAccess) =>
+      currentAccess.filter((access) => access.roleId !== role.id),
+    );
+    setWorkflowAccess((currentAccess) =>
+      currentAccess.filter((access) => access.roleId !== role.id),
+    );
+    setObjectScopes((currentScopes) =>
+      currentScopes.filter((scope) => scope.roleId !== role.id),
+    );
+    setTenantScopes((currentScopes) =>
+      currentScopes.filter((scope) => scope.roleId !== role.id),
+    );
+    setAdminRights((currentRights) =>
+      currentRights.filter((rights) => rights.roleId !== role.id),
     );
   };
 
@@ -794,6 +924,36 @@ function RolesPermissionsPlaceholder({
       .map((item) => item.trim())
       .filter(Boolean);
 
+  useEffect(() => {
+    setWorkflowAccess((currentAccess) => {
+      const existingKeys = new Set(
+        currentAccess.map(
+          (access) => `${access.roleId}::${access.workflowTypeId}`,
+        ),
+      );
+      const missingAccess = roles.flatMap((role) =>
+        activeWorkflows
+          .filter(
+            (workflow) => !existingKeys.has(`${role.id}::${workflow.id}`),
+          )
+          .map((workflow) => ({
+            roleId: role.id,
+            workflowTypeId: workflow.id,
+            canView: false,
+            canCreate: false,
+            canTransition: false,
+            canClose: false,
+            canApprove: false,
+            canViewAnalytics: false,
+          })),
+      );
+
+      return missingAccess.length
+        ? [...currentAccess, ...missingAccess]
+        : currentAccess;
+    });
+  }, [activeWorkflows, roles, setWorkflowAccess]);
+
   const addRole = () => {
     const roleName = newRoleName.trim();
     if (!roleName) return;
@@ -874,18 +1034,16 @@ function RolesPermissionsPlaceholder({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {false && (
             <button
               onClick={onResetMockPermissions}
               className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 hover:text-slate-800"
             >
               Reset mock permissions
             </button>
+            )}
             <div className="inline-flex rounded-2xl bg-slate-100 p-1">
-              {(
-                canViewMigrationCheck
-                  ? (["roles", "migration"] as const)
-                  : (["roles"] as const)
-              ).map((tab) => (
+              {(["roles"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActivePermissionsTab(tab)}
@@ -993,6 +1151,50 @@ function RolesPermissionsPlaceholder({
               {selectedRole ? (
                 <>
                   <section className="rounded-3xl border border-slate-200 bg-white p-5">
+                    {(() => {
+                      const assignmentCount = getRoleAssignmentCount(
+                        selectedRole.id,
+                      );
+                      const deleteBlocked =
+                        selectedRole.systemRole || assignmentCount > 0;
+
+                      return (
+                        <div className="mb-4 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (deleteBlocked) {
+                                if (assignmentCount > 0) {
+                                  alert(
+                                    "Role cannot be deleted because it is assigned to users.",
+                                  );
+                                }
+                                return;
+                              }
+
+                              deleteRole(selectedRole);
+                            }}
+                            disabled={selectedRole.systemRole}
+                            title={
+                              selectedRole.systemRole
+                                ? "System roles cannot be deleted"
+                                : assignmentCount > 0
+                                  ? "Role cannot be deleted because it is assigned to users."
+                                  : "Delete role"
+                            }
+                            className={cn(
+                              "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                              deleteBlocked
+                                ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300"
+                                : "border-red-100 bg-red-50 text-red-600 hover:bg-red-100",
+                            )}
+                          >
+                            <Trash2 size={14} />
+                            Delete role
+                          </button>
+                        </div>
+                      );
+                    })()}
                     <div className="grid gap-4 lg:grid-cols-[1fr_1.5fr_auto] lg:items-end">
                       <div>
                         <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
@@ -1123,7 +1325,7 @@ function RolesPermissionsPlaceholder({
                               {workflow.label || workflow.name}
                             </p>
                             <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-                              {workflowPermissionKeys.map((permission) => (
+                              {visibleWorkflowPermissionKeys.map((permission) => (
                                 <label
                                   key={permission.key}
                                   className="inline-flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600"
@@ -1150,6 +1352,7 @@ function RolesPermissionsPlaceholder({
                     </div>
                   </section>
 
+                  {false && (
                   <div className="grid gap-5 xl:grid-cols-2">
                     <section className="rounded-3xl border border-slate-200 bg-white">
                       <div className="border-b border-slate-100 p-4">
@@ -1233,7 +1436,9 @@ function RolesPermissionsPlaceholder({
                       </div>
                     </section>
                   </div>
+                  )}
 
+                  {false && (
                   <section className="rounded-3xl border border-slate-200 bg-white">
                     <div className="border-b border-slate-100 p-4">
                       <h3 className="text-sm font-semibold text-slate-900">
@@ -1269,6 +1474,7 @@ function RolesPermissionsPlaceholder({
                       })}
                     </div>
                   </section>
+                  )}
                 </>
               ) : (
                 <section className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
@@ -1855,6 +2061,10 @@ function WorkflowTypesAdmin({
 
               <div className="flex gap-2">
                 <button
+                  type="button"
+                  role="switch"
+                  aria-checked={workflow.enabled}
+                  title={workflow.enabled ? "ON" : "OFF"}
                   onClick={() =>
                     setWorkflows?.(
                       workflows.map((item) =>
@@ -1864,9 +2074,27 @@ function WorkflowTypesAdmin({
                       ),
                     )
                   }
-                  className="flex-1 px-3 py-2 rounded-xl bg-slate-50 text-slate-700 text-xs font-black hover:bg-slate-100"
+                  className={cn(
+                    "flex-1 px-3 py-2 rounded-xl border text-xs font-black transition-colors flex items-center justify-between gap-3",
+                    workflow.enabled
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-slate-50 text-slate-500 border-slate-200",
+                  )}
                 >
-                  {workflow.enabled ? "Isjungti" : "Ijungti"}
+                  <span>{workflow.enabled ? "ON" : "OFF"}</span>
+                  <span
+                    className={cn(
+                      "relative inline-flex h-5 w-9 rounded-full transition-colors",
+                      workflow.enabled ? "bg-emerald-500" : "bg-slate-300",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                        workflow.enabled ? "translate-x-4" : "translate-x-0.5",
+                      )}
+                    />
+                  </span>
                 </button>
                 <button
                   onClick={() => setEditing(workflow)}
@@ -2030,6 +2258,9 @@ function ClubsAdmin({
   setClubs,
   cities,
   users,
+  equipmentList,
+  tasks,
+  orders,
   periodicTemplates,
   setPeriodicTemplates,
 }: {
@@ -2037,12 +2268,16 @@ function ClubsAdmin({
   setClubs: React.Dispatch<React.SetStateAction<Club[]>>;
   cities: City[];
   users: User[];
+  equipmentList: any[];
+  tasks: any[];
+  orders: any[];
   periodicTemplates: any[];
   setPeriodicTemplates: React.Dispatch<React.SetStateAction<any[]>>;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<Club>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   const filteredClubs = clubs.filter((club) => {
     const cityName =
@@ -2050,11 +2285,62 @@ function ClubsAdmin({
         ? cities.find((c) => c.id === club.city_id)?.name
         : club.city) || "";
     const query = searchQuery.toLowerCase();
-    return (
+    const matchesArchiveFilter = showArchived || club.is_active !== false;
+    const matchesSearch =
       club.name.toLowerCase().includes(query) ||
-      cityName.toLowerCase().includes(query)
-    );
+      cityName.toLowerCase().includes(query);
+
+    return matchesArchiveFilter && matchesSearch;
   });
+
+  const getClubDependencies = (club: Club): LifecycleDependency[] => [
+    {
+      label: "equipment",
+      count: equipmentList.filter((equipment) => equipment.club_id === club.id || equipment.clubId === club.id).length,
+    },
+    {
+      label: "faults",
+      count: tasks.filter((task) => task.clubId === club.id || task.club_id === club.id).length,
+    },
+    {
+      label: "orders",
+      count: orders.filter((order) => order.clubId === club.id || order.club_id === club.id).length,
+    },
+    {
+      label: "periodic templates",
+      count: periodicTemplates.filter(
+        (template) =>
+          template.club_id === club.id ||
+          template.clubId === club.id ||
+          template.applies_to?.includes?.(club.id),
+      ).length,
+    },
+    {
+      label: "users",
+      count: users.filter(
+        (user) =>
+          user.assigned_clubs?.includes(club.id) ||
+          user.assignedClubIds?.includes(club.id),
+      ).length,
+    },
+  ];
+
+  const archiveClub = (clubId: string, isActive: boolean) =>
+    setClubs(
+      clubs.map((club) =>
+        club.id === clubId ? { ...club, is_active: isActive } : club,
+      ),
+    );
+
+  const deleteClub = (club: Club) => {
+    const dependencies = getClubDependencies(club);
+    if (dependencies.some((dependency) => dependency.count > 0)) {
+      alert(formatDependencyBlockMessage(dependencies));
+      return;
+    }
+
+    setClubs(clubs.filter((item) => item.id !== club.id));
+  };
 
   const handleSave = () => {
     const trimmedId = (editing.id || "").trim().toLowerCase();
@@ -2151,6 +2437,15 @@ function ClubsAdmin({
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-500">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="h-4 w-4 accent-black"
+            />
+            Show Archived
+          </label>
         </div>
         <button
           onClick={() => {
@@ -2226,34 +2521,42 @@ function ClubsAdmin({
                       </div>
                     </td>
                     <td className="py-4 flex justify-end gap-2">
-                      <button
-                        onClick={() => {
-                          setEditing({ ...club, originalId: club.id });
-                          setModalOpen(true);
-                        }}
-                        className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
-                      >
-                        <Edit2 size={16} />
-                      </button>
-                      <button
-                        className={`p-2 rounded-lg ${club.is_active !== false ? "text-red-400 hover:bg-red-50" : "text-green-400 hover:bg-green-50"}`}
-                        title={club.is_active !== false ? "Išjungti" : "Įjungti"}
-                        onClick={() =>
-                          setClubs(
-                            clubs.map((c) =>
-                              c.id === club.id
-                                ? {
-                                    ...c,
-                                    is_active:
-                                      c.is_active === false ? true : false,
-                                  }
-                                : c,
-                            ),
-                          )
-                        }
-                      >
-                        <Activity size={16} />
-                      </button>
+                      {club.is_active !== false ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditing({ ...club, originalId: club.id });
+                              setModalOpen(true);
+                            }}
+                            className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
+                            title="Redaguoti"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => archiveClub(club.id, false)}
+                            className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                          >
+                            Archive
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => archiveClub(club.id, true)}
+                            className="px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg"
+                          >
+                            Restore
+                          </button>
+                          <button
+                            onClick={() => deleteClub(club)}
+                            className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
+                            title="Delete"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );
@@ -2323,34 +2626,40 @@ function ClubsAdmin({
               </div>
 
               <div className="flex gap-2 pt-2 border-t border-slate-50">
-                <button
-                  onClick={() => {
-                    setEditing({ ...club, originalId: club.id });
-                    setModalOpen(true);
-                  }}
-                  className="flex-1 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
-                >
-                  Redaguoti
-                </button>
-                <button
-                  onClick={() =>
-                    setClubs(
-                      clubs.map((c) =>
-                        c.id === club.id
-                          ? { ...c, is_active: c.is_active === false ? true : false }
-                          : c,
-                      ),
-                    )
-                  }
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-xs font-bold",
-                    club.is_active !== false
-                      ? "bg-red-50 text-red-600"
-                      : "bg-green-50 text-green-600",
-                  )}
-                >
-                  {club.is_active !== false ? "Išjungti" : "Įjungti"}
-                </button>
+                {club.is_active !== false ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditing({ ...club, originalId: club.id });
+                        setModalOpen(true);
+                      }}
+                      className="flex-1 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
+                    >
+                      Redaguoti
+                    </button>
+                    <button
+                      onClick={() => archiveClub(club.id, false)}
+                      className="flex-1 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
+                    >
+                      Archive
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => archiveClub(club.id, true)}
+                      className="flex-1 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"
+                    >
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => deleteClub(club)}
+                      className="flex-1 py-2 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           );
@@ -2442,7 +2751,7 @@ function ClubsAdmin({
             >
               <option value="">Nepriskirtas</option>
               {users
-                .filter((u) => u.role === "COORDINATOR" && u.is_active)
+                .filter((u) => u.is_active !== false)
                 .map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
@@ -2465,17 +2774,53 @@ function ClubsAdmin({
 function CitiesAdmin({
   cities,
   setCities,
+  clubs,
 }: {
   cities: City[];
   setCities: React.Dispatch<React.SetStateAction<City[]>>;
+  clubs: Club[];
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<City>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
-  const filteredCities = cities.filter((city) =>
-    city.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
+  const filteredCities = cities.filter((city) => {
+    const query = searchQuery.toLowerCase();
+    return (
+      (showArchived || city.is_active !== false) &&
+      city.name.toLowerCase().includes(query)
+    );
+  });
+
+  const getCityDependencies = (city: City): LifecycleDependency[] => [
+    {
+      label: "clubs",
+      count: clubs.filter(
+        (club) =>
+          club.city_id === city.id ||
+          club.city === city.name ||
+          club.region === city.name,
+      ).length,
+    },
+  ];
+
+  const archiveCity = (cityId: string, isActive: boolean) =>
+    setCities(
+      cities.map((city) =>
+        city.id === cityId ? { ...city, is_active: isActive } : city,
+      ),
+    );
+
+  const deleteCity = (city: City) => {
+    const dependencies = getCityDependencies(city);
+    if (dependencies.some((dependency) => dependency.count > 0)) {
+      alert(formatDependencyBlockMessage(dependencies));
+      return;
+    }
+
+    setCities(cities.filter((item) => item.id !== city.id));
+  };
 
   const handleSave = () => {
     if (editing.id) {
@@ -2546,6 +2891,15 @@ function CitiesAdmin({
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-500">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="h-4 w-4 accent-black"
+            />
+            Show Archived
+          </label>
         </div>
         <button
           onClick={() => {
@@ -2574,33 +2928,42 @@ function CitiesAdmin({
                 >
                   <td className="py-4 font-semibold">{city.name}</td>
                   <td className="py-4 flex justify-end gap-2">
-                    <button
-                      onClick={() => {
-                        setEditing(city);
-                        setModalOpen(true);
-                      }}
-                      className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      className={`p-2 rounded-lg ${city.is_active !== false ? "text-red-400 hover:bg-red-50" : "text-green-400 hover:bg-green-50"}`}
-                      title={city.is_active !== false ? "Išjungti" : "Įjungti"}
-                      onClick={() =>
-                        setCities(
-                          cities.map((c) =>
-                            c.id === city.id
-                              ? {
-                                  ...c,
-                                  is_active: c.is_active === false ? true : false,
-                                }
-                              : c,
-                          ),
-                        )
-                      }
-                    >
-                      <Activity size={16} />
-                    </button>
+                    {city.is_active !== false ? (
+                      <>
+                        <button
+                          onClick={() => {
+                            setEditing(city);
+                            setModalOpen(true);
+                          }}
+                          className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
+                          title="Redaguoti"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => archiveCity(city.id, false)}
+                          className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                        >
+                          Archive
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => archiveCity(city.id, true)}
+                          className="px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          onClick={() => deleteCity(city)}
+                          className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
+                          title="Delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))
@@ -2634,32 +2997,40 @@ function CitiesAdmin({
                 </span>
               </div>
               <div className="flex gap-1">
-                <button
-                  onClick={() => {
-                    setEditing(city);
-                    setModalOpen(true);
-                  }}
-                  className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg"
-                >
-                  <Edit2 size={16} />
-                </button>
-                <button
-                  className={`p-2 rounded-lg ${city.is_active !== false ? "text-red-400 hover:bg-red-50" : "text-green-400 hover:bg-green-50"}`}
-                  onClick={() =>
-                    setCities(
-                      cities.map((c) =>
-                        c.id === city.id
-                          ? {
-                              ...c,
-                              is_active: c.is_active === false ? true : false,
-                            }
-                          : c,
-                      ),
-                    )
-                  }
-                >
-                  <Activity size={16} />
-                </button>
+                {city.is_active !== false ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditing(city);
+                        setModalOpen(true);
+                      }}
+                      className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => archiveCity(city.id, false)}
+                      className="px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
+                    >
+                      Archive
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => archiveCity(city.id, true)}
+                      className="px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"
+                    >
+                      Restore
+                    </button>
+                    <button
+                      onClick={() => deleteCity(city)}
+                      className="px-3 py-2 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -2719,16 +3090,21 @@ function UsersAdmin({
   clubs,
   permissionRoles,
   permissionsConfig,
+  tasks,
+  periodicTemplates,
 }: {
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   clubs: Club[];
   permissionRoles: PermissionRole[];
   permissionsConfig: PermissionPreviewConfig;
+  tasks: any[];
+  periodicTemplates: any[];
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Partial<User>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const [permissionsUser, setPermissionsUser] = useState<User | null>(null);
 
   const ROLES = [
@@ -2767,13 +3143,43 @@ function UsersAdmin({
       .map((role) => role.name)
       .join(" ")
       .toLowerCase();
-    return (
+    const matchesArchiveFilter = showArchived || user.is_active !== false;
+    const matchesSearch =
       user.name.toLowerCase().includes(query) ||
       (user.email || "").toLowerCase().includes(query) ||
       user.role.toLowerCase().includes(query) ||
-      assignedRoleText.includes(query)
-    );
+      assignedRoleText.includes(query);
+
+    return matchesArchiveFilter && matchesSearch;
   });
+
+  const getUserDependencies = (user: User): LifecycleDependency[] => [
+    {
+      label: "assignments",
+      count: tasks.filter((task) => hasMatchingAssignee(task, user)).length,
+    },
+    {
+      label: "periodic tasks",
+      count: periodicTemplates.filter((template) => hasMatchingAssignee(template, user)).length,
+    },
+  ];
+
+  const archiveUser = (userId: string, isActive: boolean) =>
+    setUsers(
+      users.map((user) =>
+        user.id === userId ? { ...user, is_active: isActive } : user,
+      ),
+    );
+
+  const deleteUser = (user: User) => {
+    const dependencies = getUserDependencies(user);
+    if (dependencies.some((dependency) => dependency.count > 0)) {
+      alert(formatDependencyBlockMessage(dependencies));
+      return;
+    }
+
+    setUsers(users.filter((item) => item.id !== user.id));
+  };
 
   const handleSave = () => {
     const normalizedEmail = editing.email?.trim().toLowerCase();
@@ -2793,6 +3199,9 @@ function UsersAdmin({
       ...editing,
       role: normalizedRole,
     });
+    const assignedClubIds = editing.assigned_clubs || editing.assignedClubIds || [];
+    const assignedRegionIds =
+      editing.region ? (editing.region === "ALL" ? ["ALL"] : [editing.region]) : editing.assignedRegionIds || ["ALL"];
     const duplicateEmail = users.find(
       (user) =>
         user.id !== editing.id &&
@@ -2816,6 +3225,9 @@ function UsersAdmin({
                   email: normalizedEmail,
                   role: normalizedRole,
                   assignedRoleIds,
+                  assignedRegionIds,
+                  assignedClubIds,
+                  assigned_clubs: assignedClubIds,
                 } as User)
               : c,
           ),
@@ -2843,8 +3255,10 @@ function UsersAdmin({
           email: normalizedEmail,
           role: normalizedRole,
           assignedRoleIds,
+          assignedRegionIds,
+          assignedClubIds,
           is_active: editing.is_active !== false,
-          assigned_clubs: editing.assigned_clubs || [],
+          assigned_clubs: assignedClubIds,
         } as User;
         setUsers([
           ...users,
@@ -2896,6 +3310,15 @@ function UsersAdmin({
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-500">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="h-4 w-4 accent-black"
+            />
+            Show Archived
+          </label>
         </div>
         <button
           onClick={() => {
@@ -2922,8 +3345,7 @@ function UsersAdmin({
               <th className="pb-3 font-medium">Vardas</th>
               <th className="pb-3 font-medium">El. pastas</th>
               <th className="pb-3 font-medium">Priskirtos rolės</th>
-              <th className="pb-3 font-medium">Scope</th>
-              <th className="pb-3 font-medium">Tenant / Organizacija</th>
+              <th className="pb-3 font-medium">Regionai / Klubai</th>
               <th className="pb-3 font-medium">Statusas</th>
               <th className="pb-3 font-medium text-right">Veiksmai</th>
             </tr>
@@ -2964,9 +3386,6 @@ function UsersAdmin({
                           .join(", ")
                       : "-"}
                   </td>
-                  <td className="py-4 text-xs text-slate-500">
-                    {getPreview(user).tenantScopeLabel}
-                  </td>
                   <td className="py-4">
                     <span
                       className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase ${
@@ -2985,47 +3404,56 @@ function UsersAdmin({
                     </span>
                   </td>
                   <td className="py-4 flex justify-end gap-2">
-                    <button
-                      onClick={() => setPermissionsUser(user)}
-                      className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
-                      title="Valdyti teises"
-                    >
-                      <ShieldCheck size={16} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditing(user);
-                        setModalOpen(true);
-                      }}
-                      className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button
-                      className={`p-2 rounded-lg ${user.is_active !== false ? "text-red-400 hover:bg-red-50" : "text-green-400 hover:bg-green-50"}`}
-                      title={user.is_active !== false ? "Išjungti" : "Įjungti"}
-                      onClick={() =>
-                        setUsers(
-                          users.map((u) =>
-                            u.id === user.id
-                              ? {
-                                  ...u,
-                                  is_active: u.is_active === false ? true : false,
-                                }
-                              : u,
-                          ),
-                        )
-                      }
-                    >
-                      <Activity size={16} />
-                    </button>
+                    {user.is_active !== false ? (
+                      <>
+                        <button
+                          onClick={() => setPermissionsUser(user)}
+                          className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
+                          title="Valdyti teises"
+                        >
+                          <ShieldCheck size={16} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditing(user);
+                            setModalOpen(true);
+                          }}
+                          className="p-2 text-slate-400 hover:bg-slate-200 rounded-lg"
+                          title="Redaguoti"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => archiveUser(user.id, false)}
+                          className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                        >
+                          Archive
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => archiveUser(user.id, true)}
+                          className="px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          onClick={() => deleteUser(user)}
+                          className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
+                          title="Delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={6}
                   className="py-8 text-center text-slate-500 font-medium"
                 >
                   Nerasta rezultatų
@@ -3082,7 +3510,7 @@ function UsersAdmin({
 
             <div className="text-xs text-slate-500">
               <span className="font-bold text-slate-400 uppercase mr-1">
-                Scope:
+                Regionai / Klubai:
               </span>
               {user.assigned_clubs?.length
                 ? user.assigned_clubs
@@ -3090,49 +3518,49 @@ function UsersAdmin({
                     .join(", ")
                 : "-"}
             </div>
-            <div className="text-xs text-slate-500">
-              <span className="font-bold text-slate-400 uppercase mr-1">
-                Tenant / Organizacija:
-              </span>
-              {getPreview(user).tenantScopeLabel}
-            </div>
 
             <div className="flex gap-2 pt-2 border-t border-slate-50">
-              <button
-                onClick={() => setPermissionsUser(user)}
-                className="px-3 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
-                title="Valdyti teises"
-              >
-                <ShieldCheck size={14} />
-              </button>
-              <button
-                onClick={() => {
-                  setEditing(user);
-                  setModalOpen(true);
-                }}
-                className="flex-1 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
-              >
-                Redaguoti
-              </button>
-              <button
-                onClick={() =>
-                  setUsers(
-                    users.map((u) =>
-                      u.id === user.id
-                        ? { ...u, is_active: u.is_active === false ? true : false }
-                        : u,
-                    ),
-                  )
-                }
-                className={cn(
-                  "px-4 py-2 rounded-lg text-xs font-bold",
-                  user.is_active !== false
-                    ? "bg-red-50 text-red-600"
-                    : "bg-green-50 text-green-600",
-                )}
-              >
-                {user.is_active !== false ? "Išjungti" : "Įjungti"}
-              </button>
+              {user.is_active !== false ? (
+                <>
+                  <button
+                    onClick={() => setPermissionsUser(user)}
+                    className="px-3 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
+                    title="Valdyti teises"
+                  >
+                    <ShieldCheck size={14} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditing(user);
+                      setModalOpen(true);
+                    }}
+                    className="flex-1 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold"
+                  >
+                    Redaguoti
+                  </button>
+                  <button
+                    onClick={() => archiveUser(user.id, false)}
+                    className="flex-1 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
+                  >
+                    Archive
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => archiveUser(user.id, true)}
+                    className="flex-1 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-bold"
+                  >
+                    Restore
+                  </button>
+                  <button
+                    onClick={() => deleteUser(user)}
+                    className="flex-1 py-2 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold"
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}
@@ -3277,7 +3705,7 @@ function UsersAdmin({
             <h4 className="text-sm font-bold text-slate-900">
               Effective access preview
             </h4>
-            <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-3">
+            <div className="mt-3 grid gap-3 text-xs text-slate-600 md:grid-cols-2">
               <div>
                 <p className="font-bold uppercase text-slate-400">
                   Assigned Roles
@@ -3289,11 +3717,9 @@ function UsersAdmin({
                 </p>
               </div>
               <div>
-                <p className="font-bold uppercase text-slate-400">Tenant</p>
-                <p className="mt-1">{getPreview(editing).tenantScopeLabel}</p>
-              </div>
-              <div>
-                <p className="font-bold uppercase text-slate-400">Scope</p>
+                <p className="font-bold uppercase text-slate-400">
+                  Regionai / Klubai
+                </p>
                 <p className="mt-1">{getPreview(editing).scopeLabel}</p>
               </div>
             </div>
@@ -3913,9 +4339,8 @@ function EquipmentAdmin({
                     >
                       <Edit2 size={16} />
                     </button>
-                    <button
-                      className={`p-2 rounded-lg ${eq.is_active !== false ? "text-red-400 hover:bg-red-50" : "text-green-400 hover:bg-green-50"}`}
-                      title={eq.is_active !== false ? "Išjungti" : "Įjungti"}
+                    <AdminActiveSwitch
+                      active={eq.is_active !== false}
                       onClick={() =>
                         setEquipmentList(
                           equipmentList.map((x: any) =>
@@ -3928,9 +4353,7 @@ function EquipmentAdmin({
                           ),
                         )
                       }
-                    >
-                      <Activity size={16} />
-                    </button>
+                    />
                   </td>
                 </tr>
               ))
@@ -4010,7 +4433,8 @@ function EquipmentAdmin({
               >
                 Redaguoti
               </button>
-              <button
+              <AdminActiveSwitch
+                active={eq.is_active !== false}
                 onClick={() =>
                   setEquipmentList(
                     equipmentList.map((x: any) =>
@@ -4020,15 +4444,7 @@ function EquipmentAdmin({
                     ),
                   )
                 }
-                className={cn(
-                  "px-4 py-2 rounded-lg text-xs font-bold",
-                  eq.is_active !== false
-                    ? "bg-red-50 text-red-600"
-                    : "bg-green-50 text-green-600",
-                )}
-              >
-                {eq.is_active !== false ? "Išjungti" : "Įjungti"}
-              </button>
+              />
             </div>
           </div>
         ))}

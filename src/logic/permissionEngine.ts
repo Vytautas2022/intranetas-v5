@@ -10,64 +10,32 @@ type PermissionKey = ModulePermission | string;
 
 type PermissionSubject = Pick<
   AuthUser,
-  "role" | "modulePermissions"
+  "role" | "modulePermissions" | "effectivePermissionsPreview"
 > | null | undefined;
-
-const DEFAULT_ROLE_MODULE_PERMISSIONS: Record<UserRole, ModulePermission[]> = {
-  SUPER_ADMIN: [
-    "darbai",
-    "gedimai",
-    "periodiniai",
-    "admin",
-    "analytics",
-    "audit",
-    "orders",
-    "zmones",
-    "ceo",
-  ],
-  ADMIN: [
-    "darbai",
-    "gedimai",
-    "periodiniai",
-    "admin",
-    "analytics",
-    "audit",
-    "orders",
-    "zmones",
-    "ceo",
-  ],
-  OPS: [
-    "darbai",
-    "gedimai",
-    "periodiniai",
-    "admin",
-    "analytics",
-    "audit",
-    "orders",
-    "zmones",
-    "ceo",
-  ],
-  COORDINATOR: ["darbai", "gedimai", "periodiniai", "analytics", "orders"],
-  CS: ["darbai", "gedimai", "analytics", "zmones"],
-  ACCOUNTING: ["orders", "audit"],
-  EXTERNAL: ["darbai"],
-};
 
 export const normalizePermissionRole = (role?: string): UserRole =>
   ((role || "EXTERNAL").trim().toUpperCase() as UserRole) || "EXTERNAL";
 
 export const getDefaultModulePermissions = (
-  role?: string,
-): ModulePermission[] =>
-  DEFAULT_ROLE_MODULE_PERMISSIONS[normalizePermissionRole(role)] ||
-  DEFAULT_ROLE_MODULE_PERMISSIONS.EXTERNAL;
+  _role?: string,
+): ModulePermission[] => [];
 
 export const getUserModulePermissions = (
   user: PermissionSubject,
-): PermissionKey[] => user?.modulePermissions || [];
+): PermissionKey[] => {
+  if (!user) return [];
+
+  const configuredPermissions = user.modulePermissions || [];
+  const previewPermissions =
+    user.effectivePermissionsPreview?.moduleAccess
+      .filter((access) => access.canView)
+      .map((access) => access.moduleId) || [];
+
+  return Array.from(new Set([...configuredPermissions, ...previewPermissions]));
+};
 
 export const isSuperAdmin = (user: PermissionSubject): boolean =>
-  normalizePermissionRole(user?.role) === "SUPER_ADMIN";
+  false;
 
 export const hasPermissionConfig = (user: PermissionSubject): boolean =>
   getUserModulePermissions(user).length > 0;
@@ -78,7 +46,6 @@ export const canAccessPermission = (
 ): boolean => {
   if (!permissionKey) return true;
   if (!user) return false;
-  if (isSuperAdmin(user)) return true;
 
   const permissions = getUserModulePermissions(user);
   if (permissions.length === 0) return false;
@@ -130,7 +97,6 @@ export const canSeeSidebarModule = (
   permissionKey?: PermissionKey,
   hidden?: boolean,
 ): boolean => {
-  if (isSuperAdmin(user)) return true;
   if (hidden) return false;
   return canAccessPermission(user, permissionKey);
 };
@@ -141,18 +107,11 @@ export const canSeeSubmodule = (
   allowedRoles?: UserRole | UserRole[],
 ): boolean => {
   if (!canAccessSubmodule(user, permissionKey)) return false;
-  if (!allowedRoles) return true;
-
-  const role = normalizePermissionRole(user?.role);
-  return Array.isArray(allowedRoles)
-    ? allowedRoles.includes(role)
-    : role === allowedRoles;
+  return true;
 };
 
 export const canManageAllClubs = (user: PermissionSubject): boolean =>
-  ["SUPER_ADMIN", "ADMIN", "OPS"].includes(normalizePermissionRole(user?.role));
+  canAccessPermission(user, "admin");
 
 export const canManagePeriodicTasks = (user: PermissionSubject): boolean =>
-  ["SUPER_ADMIN", "ADMIN", "OPS", "COORDINATOR"].includes(
-    normalizePermissionRole(user?.role),
-  );
+  canAccessPermission(user, "periodiniai") || canAccessPermission(user, "darbai");

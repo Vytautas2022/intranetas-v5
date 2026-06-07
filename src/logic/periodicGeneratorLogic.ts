@@ -8,6 +8,7 @@ import {
   resolvePeriodicDestinationWorkflowTypeId,
   type ResolvePeriodicDestinationWorkflowContext,
 } from './appWorkflowHelpers';
+import { getAssignableUsersForClub } from './userScopeLogic';
 
 /**
  * PRODUCTION NOTE:
@@ -176,22 +177,20 @@ export const generatePeriodicTasks = (
 
     targetClubs.forEach(club => {
       if (shouldGeneratePeriodicTask(template, existingCards, history, club.id, now)) {
-        // Resolve responsible user
-        let user: User | undefined;
-        
-        // REGIONAL ASSIGNMENT RULE: Vilnius -> Miglė, Kaunas -> Tomas
-        const regionalResponsible = club.region === 'Vilnius' ? 'Miglė' : 
-                                  club.region === 'Kaunas' ? 'Tomas' : null;
-
-        if (template.responsibleMode === 'CLUB_COORDINATOR') {
-          user = users.find(u => u.role === 'COORDINATOR' && u.assigned_clubs?.includes(club.id)) || users[0];
-        } else if (template.responsibleMode === 'OPS') {
-          user = users.find(u => u.role === 'OPS' || u.name === regionalResponsible) || users[0];
-        } else {
-          // Check if template has specific assignment
-          const templateAssigned = template.assigned_to;
-          user = users.find(u => u.id === template.defaultResponsibleId || u.name === templateAssigned || u.name === regionalResponsible) || users[0];
-        }
+        // Resolve responsible user from explicit template assignment, then region/club scope.
+        const templateAssigned = template.assigned_to;
+        const scopedUsers = getAssignableUsersForClub(users, club);
+        const user =
+          users.find(
+            (candidate) =>
+              candidate.is_active !== false &&
+              (candidate.id === template.defaultResponsibleId ||
+                candidate.id === templateAssigned ||
+                candidate.name === templateAssigned),
+          ) ||
+          scopedUsers[0] ||
+          users.find((candidate) => candidate.is_active !== false) ||
+          users[0];
         
         if (user) {
           newCards.push(createPeriodicTaskCard(template, club, user, now, workflowContext));

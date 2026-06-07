@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { useOrders } from './OrderContext';
 import { getOrderCategoryLabel, getOrderStatusLabel } from '../../logic/orderLogic';
 import { OrderDetailModal } from './OrderDetailModal';
-import { UserRole } from '../../types/roles';
+import type { AuthUser } from '../../auth/types';
 
 interface Props {
-  currentUser: { id: string; name: string; role: UserRole };
+  currentUser: Pick<AuthUser, "id" | "name" | "role" | "assignedRoleIds" | "effectiveRoles" | "effectivePermissionsPreview">;
 }
 
 export const OrderListView: React.FC<Props> = ({ currentUser }) => {

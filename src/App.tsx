@@ -93,7 +93,6 @@ import {
 import * as XLSX from "xlsx";
 import { clubs, Club } from "./mock-db/clubs";
 import { regionManagers } from "./mock-db/regionManagers";
-import { assignManager, findCoordinatorForClub } from "./logic/assignmentLogic";
 import {
   faults as MOCK_FAULTS,
   Fault as MockFault,
@@ -155,7 +154,13 @@ import {
   returnTaskToDarbai,
   promoteSomedayToProject,
 } from "./logic/conversionLogic";
-import { canCreateWorkflowCardResolver } from "./logic/permissionPreviewResolver";
+import {
+  canApproveWorkflowItemPreview,
+  canCloseWorkflowCardPreview,
+  canCreateWorkflowCardResolver,
+  canEditWorkflowCardPreview,
+} from "./logic/permissionPreviewResolver";
+import { getAssignableUsersForClub } from "./logic/userScopeLogic";
 
 import { cn } from "./lib/utils";
 import { HomeActionModal } from "./components/HomeActionModal";
@@ -194,6 +199,11 @@ import { AnalyticsTab } from "./components/AnalyticsTab";
 import { mockTasks } from "./mock-db/tasks";
 import { qrEquipment, qrLocations } from "./mock-db/qr-mapping";
 import { handleQrReport } from "./logic/qrLogic";
+import {
+  findActiveEquipmentFault,
+  getEquipmentIdentityFields,
+  getFaultEquipmentId,
+} from "./logic/equipmentFaultIdentity";
 import { AdminModule } from "./components/AdminModule";
 import { OpsFlowView } from "./components/OpsFlowView";
 import { EquipmentSearchModal } from "./components/EquipmentSearchModal";
@@ -273,6 +283,7 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/authContext";
+import type { AuthUser } from "./auth/types";
 import {
   canAccessModule,
   canManageAllClubs,
@@ -754,7 +765,7 @@ const FaultDetailPanel = ({
       return facilityInsights.filter((i) => i.targetId === fault.typeId);
     } else if (fault.category === "EQUIPMENT_FAULT") {
       const typeId = fault.typeId;
-      const equipId = fault.equipmentId;
+      const equipId = getFaultEquipmentId(fault);
       return equipmentInsights.filter(
         (i) =>
           (typeId && i.targetId === typeId) ||
@@ -995,12 +1006,40 @@ const FaultDetailPanel = ({
   };
 
   const club = CLUBS.find((c) => c.id === fault.clubId) || CLUBS[0];
+  const permissionCard = {
+    workflowTypeId: fault.workflowTypeId,
+    moduleId: fault.type === "ORDER" ? "orders" : "darbai",
+    type: fault.type,
+    entityType: fault.entityType,
+  };
+  const permissionUser = currentUser as AuthUser;
 
   const canEdit =
-    currentUser.role === "OPS" ||
-    currentUser.role === "Admin" ||
+    canEditWorkflowCardPreview(permissionUser, permissionCard) ||
     fault.status === Status.NEW ||
     fault.status === "NAUJAS";
+  const canCreateRelatedWorkflowCard = fault.workflowTypeId
+      ? canCreateWorkflowCardResolver(
+        permissionUser,
+        fault.workflowTypeId,
+        permissionCard.moduleId,
+      )
+    : false;
+  const canCloseWorkflowCard = canCloseWorkflowCardPreview(
+    permissionUser,
+    permissionCard,
+    fault.status,
+  );
+  const canApproveWorkflowItem = canApproveWorkflowItemPreview(
+    permissionUser,
+    permissionCard,
+  );
+  const canViewWorkflowAnalytics = Boolean(
+    fault.workflowTypeId &&
+      permissionUser.effectivePermissionsPreview?.workflowAccess.find(
+        (access) => access.workflowTypeId === fault.workflowTypeId,
+      )?.canViewAnalytics,
+  );
 
   const handleUpdateItemStatus = (
     itemIdx: number,
@@ -1147,10 +1186,7 @@ const FaultDetailPanel = ({
                     </div>
                     <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-tight relative">
                       <UserIcon size={11} />
-                      {isEditingAssignee &&
-                      (currentUser.role === "OPS" ||
-                        currentUser.role === "Admin" ||
-                        currentUser.role === "COORDINATOR") ? (
+                      {isEditingAssignee && canEdit ? (
                         <select
                           autoFocus
                           value={
@@ -1159,11 +1195,7 @@ const FaultDetailPanel = ({
                               : fault.assignedTo.name
                           }
                           onChange={(e) => {
-                            const newUser =
-                              users.find((u) => u.name === e.target.value) ||
-                              (e.target.value === "OPS"
-                                ? { id: "OPS", name: "OPS", role: "OPS" }
-                                : null);
+                            const newUser = users.find((u) => u.name === e.target.value);
                             if (newUser) {
                               const oldName =
                                 typeof fault.assignedTo === "string"
@@ -1172,10 +1204,7 @@ const FaultDetailPanel = ({
                               const newAssigneeData = {
                                 id: newUser.id,
                                 name: newUser.name,
-                                role:
-                                  newUser.role === "COORDINATOR"
-                                    ? "KOORDINATORIUS"
-                                    : newUser.role,
+                                role: newUser.role,
                               };
 
                               const historyItem: FaultHistoryItem = {
@@ -1201,14 +1230,7 @@ const FaultDetailPanel = ({
                           onBlur={() => setIsEditingAssignee(false)}
                           className="bg-white border border-slate-200 rounded px-1 py-0.5 text-slate-600 focus:outline-none"
                         >
-                          <option value="OPS">OPS</option>
-                          {users
-                            .filter(
-                              (u) =>
-                                u.role === "COORDINATOR" ||
-                                u.role === "OPS" ||
-                                u.role === "ADMIN",
-                            )
+                          {getAssignableUsersForClub(users, club)
                             .map((u) => (
                               <option
                                 key={`assignee-opt-${u.id}`}
@@ -1221,16 +1243,11 @@ const FaultDetailPanel = ({
                       ) : (
                         <span
                           onClick={() =>
-                            (currentUser.role === "OPS" ||
-                              currentUser.role === "Admin" ||
-                              currentUser.role === "COORDINATOR") &&
-                            setIsEditingAssignee(true)
+                            canEdit && setIsEditingAssignee(true)
                           }
                           className={cn(
                             "text-slate-600",
-                            (currentUser.role === "OPS" ||
-                              currentUser.role === "Admin" ||
-                              currentUser.role === "COORDINATOR") &&
+                            canEdit &&
                               "cursor-pointer hover:text-brand-lime border-b border-dotted border-slate-400",
                           )}
                         >
@@ -1270,8 +1287,7 @@ const FaultDetailPanel = ({
                 {/* Actions & Close */}
                 <div className="flex items-center gap-2 shrink-0 pt-0.5">
                   <div className="flex items-center gap-1 mr-2 border-r border-slate-100 pr-2">
-                    {(currentUser.role === "OPS" ||
-                      currentUser.role === "Admin") &&
+                    {canCreateRelatedWorkflowCard &&
                       fault.status !== Status.MOVED &&
                       fault.status !== Status.SOMEDAY && (
                         <button
@@ -1282,8 +1298,7 @@ const FaultDetailPanel = ({
                           <ArrowRight size={12} /> Inicijuoti projektą
                         </button>
                       )}
-                    {(currentUser.role === "OPS" ||
-                      currentUser.role === "Admin") &&
+                    {canCloseWorkflowCard &&
                       fault.status !== Status.REJECTED && (
                         <button
                           onClick={onReject}
@@ -1590,8 +1605,7 @@ const FaultDetailPanel = ({
                           Atidaryti
                         </a>
                       )}
-                      {(currentUser.role === "OPS" ||
-                        currentUser.role === "Admin") && (
+                      {canEdit && (
                         <button
                           onClick={() => {
                             setSopInput(fault.sop?.url || "");
@@ -1621,7 +1635,7 @@ const FaultDetailPanel = ({
                       const hasIssues = fault.orderData?.items?.some(
                         (i: any) => i.status !== "OK",
                       );
-                      if (hasIssues && currentUser.role === "Koordinatorius") {
+                      if (hasIssues && !canApproveWorkflowItem) {
                         alert(
                           "Negalite patvirtinti užsakymo, kol yra trūkstamų ar pažeistų prekių. Tai turi atlikti OPS komanda.",
                         );
@@ -1841,8 +1855,7 @@ const FaultDetailPanel = ({
                         </tbody>
                       </table>
                     </div>
-                    {(currentUser.role === "OPS" ||
-                      currentUser.role === "Admin") && (
+                    {canCloseWorkflowCard && (
                       <div className="flex gap-2">
                         <button
                           onClick={() => {
@@ -2056,8 +2069,7 @@ const FaultDetailPanel = ({
                   <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] flex items-center gap-2">
                     <Lightbulb size={12} /> Patirtys / Kaip sprendėme anksčiau
                   </h3>
-                  {(currentUser.role === "OPS" ||
-                    currentUser.role === "ADMIN") && (
+                  {(canEdit || canViewWorkflowAnalytics) && (
                     <button
                       onClick={() =>
                         setIsManualInsightOpen(!isManualInsightOpen)
@@ -2156,8 +2168,9 @@ const FaultDetailPanel = ({
                   className="flex flex-wrap gap-3"
                 >
                   {(() => {
-                    const equipment = fault.equipmentId
-                      ? equipmentList.find((e) => e.id === fault.equipmentId)
+                    const faultEquipmentId = getFaultEquipmentId(fault);
+                    const equipment = faultEquipmentId
+                      ? equipmentList.find((e) => e.id === faultEquipmentId)
                       : null;
                     const displayMedia = [...fault.media];
 
@@ -3222,28 +3235,23 @@ const QrReportView = ({
   } | null>(null);
 
   const equipment = params.equipment_id
-    ? qrEquipment.find((e) => e.id === params.equipment_id)
+    ? qrEquipment.find((e) => e.id === params.equipment_id) ||
+      equipmentList.find((e) => e.id === params.equipment_id)
     : null;
   const location = params.location_id
     ? qrLocations.find((l) => l.id === params.location_id)
     : null;
 
   const existingTask = useMemo(() => {
-    const activeStatuses = [
-      Status.NEW,
-      Status.IN_PROGRESS,
-      Status.WAITING_DETAILS,
-    ];
     if (params.equipment_id) {
-      return allTasks.find(
-        (t) =>
-          t.entityType === "fault" &&
-          t.type === "EQUIPMENT_FAULT" &&
-          t.equipment_id === params.equipment_id &&
-          activeStatuses.includes(t.status as Status),
-      );
+      return findActiveEquipmentFault(allTasks, params.equipment_id);
     }
     if (params.location_id) {
+      const activeStatuses = [
+        Status.NEW,
+        Status.IN_PROGRESS,
+        Status.WAITING_DETAILS,
+      ];
       return allTasks.find(
         (t) =>
           t.entityType === "fault" &&
@@ -3724,6 +3732,12 @@ function MainApp() {
   useEffect(() => {
     writeMockStorage("app_users", appUsers);
   }, [appUsers]);
+  const getScopedAssigneesForClub = (clubId?: string): User[] => {
+    const club = appClubs.find((candidate) => candidate.id === clubId);
+    return getAssignableUsersForClub(appUsers, club);
+  };
+  const getDefaultAssigneeForClub = (clubId?: string): User | undefined =>
+    getScopedAssigneesForClub(clubId)[0];
   const [appCities, setAppCities] = useState<City[]>(initialCities);
   const [appFacilityTemplates, setAppFacilityTemplates] =
     useState<any[]>(facilityTemplates);
@@ -3935,11 +3949,12 @@ function MainApp() {
     // Extract from tasks
     tasks.forEach((t) => {
       if (
-        t.equipment_id &&
-        !mergedEquipment.find((e) => e.id === t.equipment_id)
+        getFaultEquipmentId(t) &&
+        !mergedEquipment.find((e) => e.id === getFaultEquipmentId(t))
       ) {
+        const equipmentId = getFaultEquipmentId(t);
         mergedEquipment.push({
-          id: t.equipment_id,
+          id: equipmentId,
           club_id: t.clubId,
           number: "TBD",
           name: t.title.split(" - ")[0],
@@ -4425,27 +4440,24 @@ function MainApp() {
   };
 
   const handleAssign = (faultId: string, userId: string) => {
-    const assignedUser =
-      userId === "OPS"
-        ? { name: "OPS", email: "ops@fitsport.lt" }
-        : appUsers.find((u) => u.id === userId);
-    if (!assignedUser) return;
-
     const fault: any =
       faults.find((f) => f.id === faultId) ||
       tasks.find((f) => f.id === faultId);
     if (!fault) return;
 
+    const assignedUser = appUsers.find((u) => u.id === userId || u.name === userId);
+    if (userId && !assignedUser) return;
+
     const oldAssigneeId = fault.assigned_to || fault.assigneeId || "Niekas";
     const oldAssigneeName = fault.assigneeName || fault.assignedTo || "Niekas";
 
     const updates: Partial<Fault> = {
-      assigned_to: userId,
+      assigned_to: assignedUser?.id || "",
       assigned_by: currentUser.name,
       assigned_at: Date.now(),
-      assigneeId: userId,
-      assigneeName: assignedUser.name,
-      assignedTo: assignedUser.name,
+      assigneeId: assignedUser?.id || "",
+      assigneeName: assignedUser?.name || "",
+      assignedTo: assignedUser?.name || "",
       public_url: `/task/${faultId}`,
     } as any;
 
@@ -4456,16 +4468,18 @@ function MainApp() {
       prev.map((t) => (t.id === faultId ? { ...t, ...updates } : t)),
     );
 
-    logAudit(faultId, "assignment", `Darbas priskirtas: ${assignedUser.name}`, {
-      assigned_to: { from: oldAssigneeName, to: assignedUser.name },
+    logAudit(faultId, "assignment", `Darbas priskirtas: ${assignedUser?.name || "Nepriskirta"}`, {
+      assigned_to: { from: oldAssigneeName, to: assignedUser?.name || "Nepriskirta" },
     });
 
     // Simulated email notification
-    console.log(`[MOCK EMAIL] To: ${assignedUser.email}`);
-    console.log(`[MOCK EMAIL] Subject: Jums priskirtas darbas`);
-    console.log(
-      `[MOCK EMAIL] Body: Jums priskirtas darbas "${fault.title}". Nuoroda: ${window.location.origin}/task/${faultId}`,
-    );
+    if (assignedUser?.email) {
+      console.log(`[MOCK EMAIL] To: ${assignedUser.email}`);
+      console.log(`[MOCK EMAIL] Subject: Jums priskirtas darbas`);
+      console.log(
+        `[MOCK EMAIL] Body: Jums priskirtas darbas "${fault.title}". Nuoroda: ${window.location.origin}/task/${faultId}`,
+      );
+    }
   };
 
   const openCard = (faultId: string) => {
@@ -4744,6 +4758,7 @@ function MainApp() {
               SUPPLIERS.find((s) => s.id === supplierId)?.name ||
               "Nežinomas tiekėjas";
 
+            const defaultAssignee = getDefaultAssigneeForClub(regForm.clubId);
             const allItems = supplierItems.map((d) => {
               const product = products.find((p) => p.id === d.productId);
               const setting = inventorySettings.find(
@@ -4786,11 +4801,11 @@ function MainApp() {
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
               status_history: createFaultHistory(currentUser.name),
-              assigneeId: "",
-              assigneeName: "OPS",
+              assigneeId: defaultAssignee?.id || "",
+              assigneeName: defaultAssignee?.name || "",
               priority: "medium",
               slaHours: 24,
-              assignedTo: "OPS",
+              assignedTo: defaultAssignee?.name || "",
               comments: [],
               media: [],
               watchers: [],
@@ -4873,6 +4888,7 @@ function MainApp() {
           status: "OK",
         }));
 
+        const defaultAssignee = getDefaultAssigneeForClub(regForm.clubId);
         const taskId = generateUniqueId("f-ord-print");
         const newTask: Fault = {
           id: taskId,
@@ -4889,11 +4905,11 @@ function MainApp() {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           status_history: createFaultHistory(currentUser.name),
-          assigneeId: "",
-          assigneeName: "OPS",
+          assigneeId: defaultAssignee?.id || "",
+          assigneeName: defaultAssignee?.name || "",
           priority: "medium",
           slaHours: 48,
-          assignedTo: "OPS",
+          assignedTo: defaultAssignee?.name || "",
           comments: [],
           media: regForm.attachments.map((a) => ({
             id: a.id,
@@ -4930,6 +4946,7 @@ function MainApp() {
           setRegValidationErrors({ title: "Įveskite užsakymo aprašymą" });
           return;
         }
+        const defaultAssignee = getDefaultAssigneeForClub(regForm.clubId);
         const newTask: Fault = {
           id: generateUniqueId("f-ord-other"),
           title: `Kitas užsakymas: ${clubName}`,
@@ -4945,11 +4962,11 @@ function MainApp() {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           status_history: createFaultHistory(currentUser.name),
-          assigneeId: "",
-          assigneeName: "OPS",
+          assigneeId: defaultAssignee?.id || "",
+          assigneeName: defaultAssignee?.name || "",
           priority: "medium",
           slaHours: 72,
-          assignedTo: "OPS",
+          assignedTo: defaultAssignee?.name || "",
           comments: [],
           media: [],
           watchers: [],
@@ -4997,11 +5014,26 @@ function MainApp() {
       errors.title = "Įveskite darbo aprašymą";
     }
 
-    if (
-      regForm.coordinatorWarning &&
-      currentUser.role !== "OPS" &&
-      currentUser.role !== "ADMIN"
-    ) {
+    const warningWorkflowForCreate =
+      workflowTypes.find((workflow) => workflow.id === regForm.workflowTypeId) ||
+      getWorkflowTypeByLegacyCategory(regForm.category);
+    const warningWorkflowTypeIdForCreate =
+      warningWorkflowForCreate?.id ||
+      regForm.workflowTypeId ||
+      (regForm.orderCategory ? "orders" : undefined);
+    const warningCreateModuleId =
+      warningWorkflowForCreate?.action === "order" || regForm.orderCategory
+        ? "orders"
+        : "darbai";
+    const canBypassCoordinatorWarning = warningWorkflowTypeIdForCreate
+      ? canCreateWorkflowCardResolver(
+          currentUser,
+          warningWorkflowTypeIdForCreate,
+          warningCreateModuleId,
+        )
+      : false;
+
+    if (regForm.coordinatorWarning && !canBypassCoordinatorWarning) {
       errors.clubId =
         "Šiam klubui nepriskirtas koordinatorius. Kreipkitės į OPS.";
     }
@@ -5012,6 +5044,68 @@ function MainApp() {
     }
 
     setRegValidationErrors({});
+
+    const manualEquipmentId =
+      regForm.category === "EQUIPMENT_FAULT" && regForm.equipmentId !== "other"
+        ? regForm.equipmentId
+        : undefined;
+    const existingEquipmentFault = findActiveEquipmentFault(
+      faults,
+      manualEquipmentId,
+    );
+
+    if (existingEquipmentFault) {
+      const now = Date.now();
+      const systemComment: FaultComment = {
+        id: generateUniqueId("c"),
+        text: `Additional report received via manual registration\n\n${regForm.title.trim()}`,
+        author: "SISTEMA",
+        createdAt: now,
+        mentions: [],
+        parentId: null,
+        system: true,
+        edited: false,
+        history: [],
+        deleted: false,
+        source: "USER",
+      };
+      const updatedExistingFault: Fault = {
+        ...existingEquipmentFault,
+        comments: [...(existingEquipmentFault.comments || []), systemComment],
+        repeat_count: (existingEquipmentFault.repeat_count || 0) + 1,
+        updatedAt: now,
+        updated_at: new Date(now).toISOString(),
+        updatedBy: currentUser.name,
+      };
+
+      setFaults((prev) =>
+        prev.map((fault) =>
+          fault.id === updatedExistingFault.id ? updatedExistingFault : fault,
+        ),
+      );
+      setNotifications((prev) =>
+        addNotification(
+          prev,
+          currentUser.name,
+          "Active fault already exists. Information added to existing fault.",
+          "normal",
+          updatedExistingFault.id,
+        ),
+      );
+      logAudit(
+        updatedExistingFault.id,
+        "COMMENT_ADDED",
+        "Additional manual equipment report added to existing fault",
+      );
+      setSelectedFault(updatedExistingFault);
+      setIsDetailPanelOpen(true);
+      setActiveModal(null);
+      setRegStep(2);
+      setUploadError(null);
+      setRegValidationErrors({});
+      resetRegForm();
+      return;
+    }
 
     const isOther = regForm.typeId === "other";
 
@@ -5102,7 +5196,7 @@ function MainApp() {
       }
     }
 
-    const coordinator = findCoordinatorForClub(regForm.clubId);
+    const defaultAssignee = getDefaultAssigneeForClub(regForm.clubId);
 
     const newFault: Fault = {
       id: generateUniqueId("f"),
@@ -5120,15 +5214,15 @@ function MainApp() {
       updated_at: new Date().toISOString(),
       status_history: createFaultHistory(currentUser.name),
       description: isOther ? "" : regForm.title,
-      assignedTo: coordinator
+      assignedTo: defaultAssignee
         ? {
-            id: coordinator.id,
-            name: coordinator.name,
-            role: "KOORDINATORIUS",
+            id: defaultAssignee.id,
+            name: defaultAssignee.name,
+            role: defaultAssignee.role,
           }
-        : "OPS",
-      assigneeId: coordinator ? coordinator.id : "OPS",
-      assigneeName: coordinator ? coordinator.name : "OPS",
+        : "",
+      assigneeId: defaultAssignee?.id || "",
+      assigneeName: defaultAssignee?.name || "",
       comments: [],
       media: regForm.attachments.map((a) => ({
         type: a.type,
@@ -5159,11 +5253,12 @@ function MainApp() {
         getWorkflowTypeByLegacyCategory(regForm.category)?.id,
       region: club?.city,
       typeId: regForm.typeId, // Legacy mapping
-      equipmentId:
+      ...getEquipmentIdentityFields(
         regForm.category === "EQUIPMENT_FAULT" &&
-        regForm.equipmentId !== "other"
+          regForm.equipmentId !== "other"
           ? regForm.equipmentId
           : undefined,
+      ),
       customEquipmentName:
         regForm.category === "EQUIPMENT_FAULT" &&
         regForm.equipmentId === "other"
@@ -5658,7 +5753,7 @@ ${task.updatedBy}
           },
         ]);
       } else if (fault.category === "EQUIPMENT_FAULT") {
-        const targetId = fault.typeId || fault.equipmentId;
+        const targetId = fault.typeId || getFaultEquipmentId(fault);
         if (targetId) {
           setEquipmentInsights((prev) => [
             ...prev,
@@ -5681,8 +5776,7 @@ ${task.updatedBy}
     const f = faults.find((x) => x.id === activeFaultId);
     if (!f) return;
 
-    // Find OPS user to assign as project owner
-    const opsUser = users.find((u) => u.role === "OPS");
+    const projectOwner = getDefaultAssigneeForClub(f.clubId) || currentUser;
 
     const now = Date.now();
     const newProject: Fault = {
@@ -5691,9 +5785,9 @@ ${task.updatedBy}
       entityType: "project" as any,
       status: Status.NEW,
       type: "PROJECT" as any,
-      assignedTo: opsUser?.name ?? currentUser.name,
-      assigneeId: opsUser?.id ?? currentUser.id,
-      assigneeName: opsUser?.name ?? currentUser.name,
+      assignedTo: projectOwner.name,
+      assigneeId: projectOwner.id,
+      assigneeName: projectOwner.name,
       code: "P-" + Math.floor(Math.random() * 1000 + 100),
       createdAt: now,
       updatedAt: now,
@@ -6403,7 +6497,8 @@ ${task.updatedBy}
               setPeriodicTemplates={setAppPeriodicTemplates}
               clubTaskConfigs={clubTaskConfigs}
               setClubTaskConfigs={setClubTaskConfigs}
-              tasks={faults}
+              tasks={[...faults, ...tasks]}
+              orders={orders}
               workflowTypes={workflowTypes}
               setWorkflowTypes={updateWorkflowTypes}
               renderPeriodicModule={() => <PeriodicAdminModule />}
@@ -6857,7 +6952,8 @@ ${task.updatedBy}
                           setPeriodicTemplates={setAppPeriodicTemplates}
                           clubTaskConfigs={clubTaskConfigs}
                           setClubTaskConfigs={setClubTaskConfigs}
-                          tasks={faults}
+                          tasks={[...faults, ...tasks]}
+                          orders={orders}
                           workflowTypes={workflowTypes}
                           setWorkflowTypes={updateWorkflowTypes}
                           renderPeriodicModule={() => <PeriodicAdminModule />}
@@ -6955,7 +7051,7 @@ ${task.updatedBy}
                 ]);
               } else if (selectedFault.category === "EQUIPMENT_FAULT") {
                 const targetId =
-                  selectedFault.typeId || selectedFault.equipmentId;
+                  selectedFault.typeId || getFaultEquipmentId(selectedFault);
                 if (targetId) {
                   setEquipmentInsights((prev) => [
                     ...prev,
@@ -8387,15 +8483,15 @@ ${task.updatedBy}
                             value={regForm.clubId}
                             onChange={(e) => {
                               const newClubId = e.target.value;
-                              const coordinator =
-                                findCoordinatorForClub(newClubId);
+                              const defaultAssignee =
+                                getDefaultAssigneeForClub(newClubId);
                               setRegForm({
                                 ...regForm,
                                 clubId: newClubId,
                                 equipmentId: "",
                                 typeId: "",
-                                assigneeId: coordinator ? coordinator.id : "",
-                                coordinatorWarning: !coordinator && !!newClubId,
+                                assigneeId: defaultAssignee?.id || "",
+                                coordinatorWarning: !defaultAssignee && !!newClubId,
                               });
                             }}
                             className={cn(
@@ -9723,6 +9819,7 @@ const FaultCard = React.memo(({
     typeof fault.assignedTo === "string"
       ? fault.assignedTo || fault.assigneeName || "Niekas"
       : fault.assignedTo.name;
+  const assignableUsers = getAssignableUsersForClub(allUsers as User[], club);
 
   return (
     <Draggable draggableId={fault.id} index={index}>
@@ -9741,8 +9838,9 @@ const FaultCard = React.memo(({
           )}
         >
           {(() => {
-            const equipment = fault.equipmentId
-              ? equipmentList.find((e) => e.id === fault.equipmentId)
+            const faultEquipmentId = getFaultEquipmentId(fault);
+            const equipment = faultEquipmentId
+              ? equipmentList.find((e) => e.id === faultEquipmentId)
               : null;
             const coverUrl =
               fault.coverImage ||
@@ -9889,28 +9987,8 @@ const FaultCard = React.memo(({
                             )}
                           />
                         </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onAssign?.(fault.id, "OPS");
-                            setIsAssignDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-100 rounded-lg text-[10px] font-bold text-slate-700 flex items-center justify-between"
-                        >
-                          OPS
-                          <Check
-                            size={10}
-                            className={cn(
-                              "text-brand-lime opacity-0",
-                              (typeof fault.assignedTo === "string"
-                                ? fault.assignedTo
-                                : fault.assignedTo.name) === "OPS" &&
-                                "opacity-100",
-                            )}
-                          />
-                        </button>
                         <div className="h-px bg-slate-50 my-1" />
-                        {allUsers
+                        {assignableUsers
                           .filter((u) => u.name !== currentUserName)
                           .map((user) => (
                             <button

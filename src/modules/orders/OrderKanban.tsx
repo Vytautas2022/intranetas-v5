@@ -3,7 +3,7 @@ import { useOrders } from './OrderContext';
 import { OrderCard } from './OrderCard';
 import { OrderStatus } from '../../mock-db/orders';
 import { OrderDetailModal } from './OrderDetailModal';
-import { UserRole } from '../../types/roles';
+import type { AuthUser } from '../../auth/types';
 
 const COLUMNS: { id: OrderStatus; label: string }[] = [
   { id: 'DRAFT', label: 'Juodraščiai' },
@@ -18,7 +18,7 @@ const COLUMNS: { id: OrderStatus; label: string }[] = [
 ];
 
 interface Props {
-  currentUser: { id: string; name: string; role: UserRole };
+  currentUser: Pick<AuthUser, "id" | "name" | "role" | "assignedRoleIds" | "effectiveRoles" | "effectivePermissionsPreview">;
 }
 
 export const OrderKanban: React.FC<Props> = ({ currentUser }) => {

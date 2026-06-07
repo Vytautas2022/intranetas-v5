@@ -3,6 +3,9 @@ import { qrEquipment, qrLocations } from '../mock-db/qr-mapping';
 import { clubs } from '../mock-db/clubs';
 import { equipmentList as adminEquipment } from '../mock-db/admin';
 import { generateUniqueId, generateId } from './idLogic';
+import { findActiveEquipmentFault, getEquipmentIdentityFields } from './equipmentFaultIdentity';
+import { getDefaultEquipmentIssueTypeForQr } from './equipmentIssueTypeLogic';
+import { getSlaDeadline } from './slaEngine';
 
 export interface QrReportInput {
   equipment_id?: string;
@@ -27,16 +30,10 @@ export function handleQrReport(
   // 1. Deduplication
   let existingTask: Fault | undefined;
   
-  const activeStatuses = [Status.NEW, Status.IN_PROGRESS, Status.WAITING_DETAILS];
-
   if (input.equipment_id) {
-    existingTask = allTasks.find(t => 
-      t.entityType === 'fault' &&
-      t.type === 'EQUIPMENT_FAULT' &&
-      t.equipment_id === input.equipment_id &&
-      activeStatuses.includes(t.status as Status)
-    );
+    existingTask = findActiveEquipmentFault(allTasks, input.equipment_id);
   } else if (input.location_id) {
+    const activeStatuses = [Status.NEW, Status.IN_PROGRESS, Status.WAITING_DETAILS];
     existingTask = allTasks.find(t => 
       t.entityType === 'fault' &&
       t.type === 'FACILITY_FAULT' &&
@@ -114,6 +111,18 @@ export function handleQrReport(
 
   const club = clubs.find(c => c.id === clubId);
   const clubName = club ? club.name : clubId;
+  const equipmentIssueType =
+    type === 'EQUIPMENT_FAULT' ? getDefaultEquipmentIssueTypeForQr() : null;
+
+  if (type === 'EQUIPMENT_FAULT' && !equipmentIssueType) {
+    return {
+      success: false,
+      message: "Nerastas aktyvus treniruoklio gedimo tipas QR registracijai.",
+    };
+  }
+
+  const slaHours = equipmentIssueType?.sla_hours ?? 24;
+  const priority = equipmentIssueType?.priority ?? 'medium';
 
   const newTask: Fault = {
     id: generateUniqueId('f'),
@@ -128,8 +137,9 @@ export function handleQrReport(
     updatedAt: now,
     assigneeId: '',
     assigneeName: 'Nepriskirta',
-    priority: 'medium',
-    slaHours: 24,
+    priority,
+    slaHours,
+    slaDeadline: getSlaDeadline({ createdAt: now, slaHours }),
     assignedTo: 'Nepriskirta',
     comments: [],
     media: [],
@@ -138,7 +148,9 @@ export function handleQrReport(
     rejectReason: '',
     updatedBy: currentUser.name,
     code: generateId(),
-    equipment_id: input.equipment_id,
+    ...getEquipmentIdentityFields(input.equipment_id),
+    issue_type_id: equipmentIssueType?.id,
+    typeId: equipmentIssueType?.id,
     location_id: input.location_id,
     repeat_count: 0,
     history: [

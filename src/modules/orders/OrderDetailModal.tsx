@@ -7,13 +7,13 @@ import {
   getOrderUrgencyLabel, 
   canUserApprove 
 } from '../../logic/orderLogic';
-import { UserRole } from '../../types/roles';
+import type { AuthUser } from '../../auth/types';
 import { ChecklistSection } from '../../components/ChecklistSection';
 
 interface Props {
   orderId: string;
   onClose: () => void;
-  currentUser: { id: string; name: string; role: UserRole };
+  currentUser: Pick<AuthUser, "id" | "name" | "role" | "assignedRoleIds" | "effectiveRoles" | "effectivePermissionsPreview">;
 }
 
 export const OrderDetailModal: React.FC<Props> = ({ orderId, onClose, currentUser }) => {
@@ -46,7 +46,7 @@ export const OrderDetailModal: React.FC<Props> = ({ orderId, onClose, currentUse
             <button onClick={() => handleAction(() => submitForApproval(order.id, currentUser.name))} className="px-3 py-1 bg-slate-900 text-white text-xs font-bold rounded">Teikti tvirtinti</button>
           )}
 
-          {order.status === 'PENDING_APPROVAL' && canUserApprove(order, currentUser.id, currentUser.role) && (
+          {order.status === 'PENDING_APPROVAL' && canUserApprove(order, currentUser) && (
             <>
               <button onClick={() => handleAction(() => approveOrder(order.id, currentUser.id, currentUser.name))} className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded">Patvirtinti</button>
               {!showReject ? (
