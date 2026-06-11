@@ -45,6 +45,9 @@ export interface ModuleRegistryItem {
 
 export type AdminModuleTabId =
   | "clubs"
+  | "asset_types"
+  | "asset_objects"
+  | "asset_issue_types"
   | "facility"
   | "equipment"
   | "equipment_issues"
@@ -237,6 +240,21 @@ const adminRouteRegistry: AdminRouteRegistryItem[] = [
     path: "/admin/roles-permissions",
     tabId: "admin-roles-permissions",
     adminTabId: "roles_permissions",
+  },
+  {
+    path: "/admin/turto-tipai",
+    tabId: "admin-asset-types",
+    adminTabId: "asset_types",
+  },
+  {
+    path: "/admin/turto-objektai",
+    tabId: "admin-asset-objects",
+    adminTabId: "asset_objects",
+  },
+  {
+    path: "/admin/turto-gedimo-tipai",
+    tabId: "admin-asset-issue-types",
+    adminTabId: "asset_issue_types",
   },
   {
     path: "/admin/treniruokliai",

@@ -2,7 +2,8 @@ import { PeriodicTemplate } from '../mock-db/periodicTemplates';
 import { Fault, Status, Priority } from '../types/faults';
 import { Club } from '../mock-db/clubs';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
-import { equipmentList, equipmentIssueTypesList } from '../mock-db/admin';
+import { getLegacyEquipmentIssueTypes } from '../mock-db/assetIssueTypes';
+import { getEquipmentAssetObjects } from '../mock-db/assetObjects';
 import { Order } from '../mock-db/orders';
 import { cloneChecklistTemplatesForGeneratedCard } from './checklistLogic';
 import { workflowTypes as defaultWorkflowTypes } from '../mock-db/workflowTypes';
@@ -11,6 +12,9 @@ import {
   type ResolvePeriodicDestinationWorkflowContext,
 } from './appWorkflowHelpers';
 import { getEquipmentIdentityFields, getFaultEquipmentId } from './equipmentFaultIdentity';
+
+const equipmentIssueTypesList = getLegacyEquipmentIssueTypes();
+const equipmentList = getEquipmentAssetObjects();
 
 export interface GenerationResult {
   newFaults: Fault[];

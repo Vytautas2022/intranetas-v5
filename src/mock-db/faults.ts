@@ -96,6 +96,7 @@ export interface Fault {
   category?: string;
   typeId?: string;
   equipmentId?: string;
+  assetObjectId?: string;
   template_id?: string;
   issue_type_id?: string;
   converted_to_task_id?: string;

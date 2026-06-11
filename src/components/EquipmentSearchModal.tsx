@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, X, AlertCircle, Plus, MessageSquare, CheckCircle, ChevronDown } from 'lucide-react';
-import { equipmentList } from '../mock-db/admin';
+import { getEquipmentAssetObjects } from '../mock-db/assetObjects';
 import { clubs } from '../mock-db/clubs';
 import { cn } from '../lib/utils';
 import { Fault } from '../mock-db/faults';
 import { Status } from '../types/faults';
 import { getPriorityColor, getPriorityLabel } from '../logic/faultLogic';
 import { getFaultEquipmentId } from '../logic/equipmentFaultIdentity';
+
+const equipmentList = getEquipmentAssetObjects();
 
 interface Props {
   isOpen: boolean;

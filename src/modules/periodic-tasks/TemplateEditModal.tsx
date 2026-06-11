@@ -10,13 +10,17 @@ import {
 import { PeriodicTemplate } from "../../mock-db/periodicTemplates";
 import { users, User } from "../../mock-db/users";
 import { clubs, Club } from "../../mock-db/clubs";
-import { equipmentList, equipmentIssueTypesList } from "../../mock-db/admin";
+import { getLegacyEquipmentIssueTypes } from "../../mock-db/assetIssueTypes";
+import { getEquipmentAssetObjects } from "../../mock-db/assetObjects";
 import { RichTextEditor } from "../../components/ui/RichTextEditor";
 import { getAssignableUsersForClub } from "../../logic/userScopeLogic";
 import {
   periodicTaskInstances,
   PeriodicTaskInstance,
 } from "../../mock-db/periodicTasks";
+
+const equipmentIssueTypesList = getLegacyEquipmentIssueTypes();
+const equipmentList = getEquipmentAssetObjects();
 
 interface TemplateEditModalProps {
   template: PeriodicTemplate;

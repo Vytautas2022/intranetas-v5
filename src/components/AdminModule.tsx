@@ -49,7 +49,6 @@ import { clubs as initialClubs, Club } from "../mock-db/clubs";
 import {
   facilityTemplates as initialFacilityTemplates,
   equipmentList as initialEquipment,
-  equipmentIssueTypesList as initialEquipmentIssueTypes,
   productsList as initialProducts,
   clubInventorySettingsList as initialInventorySettings,
   suppliersList as initialSuppliers,
@@ -66,6 +65,16 @@ import {
   workflowTypes as initialWorkflowTypes,
   WorkflowType,
 } from "../mock-db/workflowTypes";
+import { assetTypes as initialAssetTypes, type AssetType } from "../mock-db/assetTypes";
+import {
+  assetObjects as initialAssetObjects,
+  type AssetObject,
+} from "../mock-db/assetObjects";
+import {
+  assetIssueTypes as initialAssetIssueTypes,
+  getLegacyIssueTypes,
+  type AssetIssueType,
+} from "../mock-db/assetIssueTypes";
 import {
   type AdminRightsPermission,
   type ModuleAccessPermission,
@@ -100,8 +109,6 @@ interface AdminModuleProps {
   setFacilityTemplates: React.Dispatch<React.SetStateAction<any[]>>;
   equipmentList: any[];
   setEquipmentList: React.Dispatch<React.SetStateAction<any[]>>;
-  equipmentIssueTypes: any[];
-  setEquipmentIssueTypes: React.Dispatch<React.SetStateAction<any[]>>;
   periodicTemplates: any[];
   setPeriodicTemplates: React.Dispatch<React.SetStateAction<any[]>>;
   clubTaskConfigs: any[];
@@ -144,6 +151,9 @@ const adminNavigationItems: AdminNavigationItem[] = [
   { id: "users", label: "Vartotojai", group: "Organization", icon: Users, visibility: "visible" },
   { id: "roles_permissions", label: "Roles & Permissions", group: "Organization", icon: ShieldCheck, visibility: "visible" },
   { id: "workflow_types", label: "Workflow Types", group: "Workflow System", icon: Workflow, visibility: "visible" },
+  { id: "asset_types", label: "Asset Types", group: "Assets / Objects", icon: Package, visibility: "visible" },
+  { id: "asset_objects", label: "Turto objektai", group: "Assets / Objects", icon: Building, visibility: "visible" },
+  { id: "asset_issue_types", label: "Asset Issue Types", group: "Assets / Objects", icon: Activity, visibility: "hidden" },
   { id: "equipment", label: "Treniruokliai", group: "Assets / Objects", icon: Dumbbell, visibility: "visible" },
   { id: "facility", label: "Patalpų darbai", group: "Assets / Objects", icon: Wrench, visibility: "visible" },
   { id: "equipment_issues", label: "Gedimo tipas", group: "Assets / Objects", icon: Activity, visibility: "visible" },
@@ -265,8 +275,6 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   setFacilityTemplates,
   equipmentList,
   setEquipmentList,
-  equipmentIssueTypes,
-  setEquipmentIssueTypes,
   periodicTemplates,
   setPeriodicTemplates,
   clubTaskConfigs,
@@ -301,6 +309,11 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const [permissionAdminRights, setPermissionAdminRights] = useState<
     AdminRightsPermission[]
   >(initialPermissionConfig.adminRights);
+  const [assetTypes, setAssetTypes] = useState<AssetType[]>(initialAssetTypes);
+  const [assetObjects, setAssetObjects] =
+    useState<AssetObject[]>(initialAssetObjects);
+  const [assetIssueTypes, setAssetIssueTypes] =
+    useState<AssetIssueType[]>(initialAssetIssueTypes);
   const permissionPreviewConfig: PermissionPreviewConfig = {
     roles: permissionRoles,
     moduleAccess: permissionModuleAccess,
@@ -475,10 +488,32 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             clubs={clubs}
           />
         )}
+        {path.includes(getTabRoute("asset_types")) && (
+          <AssetTypesAdmin
+            assetTypes={assetTypes}
+            setAssetTypes={setAssetTypes}
+          />
+        )}
+        {path.includes(getTabRoute("asset_objects")) && (
+          <AssetObjectsAdmin
+            assetTypes={assetTypes}
+            assetObjects={assetObjects}
+            setAssetObjects={setAssetObjects}
+            clubs={clubs}
+          />
+        )}
+        {path.includes(getTabRoute("asset_issue_types")) && (
+          <AssetIssueTypesAdmin
+            assetTypes={assetTypes}
+            issueTypes={assetIssueTypes}
+            setIssueTypes={setAssetIssueTypes}
+          />
+        )}
         {path.includes(getTabRoute("equipment_issues")) && (
           <EquipmentIssuesAdmin
-            issues={equipmentIssueTypes}
-            setIssues={setEquipmentIssueTypes}
+            assetTypes={assetTypes}
+            issueTypes={assetIssueTypes}
+            setIssueTypes={setAssetIssueTypes}
           />
         )}
         {path.includes(getTabRoute("inventory")) && (
@@ -499,6 +534,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           <WorkflowTypesAdmin
             workflows={workflowTypes}
             setWorkflows={setWorkflowTypes}
+            users={users}
+            assetTypes={assetTypes}
           />
         )}
         {path.includes(getTabRoute("audit")) &&
@@ -1921,14 +1958,765 @@ function AdminModal({
   );
 }
 
+function AssetTypesAdmin({
+  assetTypes,
+  setAssetTypes,
+}: {
+  assetTypes: AssetType[];
+  setAssetTypes: React.Dispatch<React.SetStateAction<AssetType[]>>;
+}) {
+  const [editing, setEditing] = useState<AssetType | null>(null);
+
+  const saveAssetType = () => {
+    if (!editing) return;
+
+    const exists = assetTypes.some((assetType) => assetType.id === editing.id);
+    const nextAssetType: AssetType = {
+      ...editing,
+      id:
+        editing.id ||
+        `asset-type-${editing.code.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      code: editing.code.trim().toUpperCase(),
+      name: editing.name.trim() || editing.code.trim(),
+    };
+
+    setAssetTypes(
+      exists
+        ? assetTypes.map((assetType) =>
+            assetType.id === editing.id ? nextAssetType : assetType,
+          )
+        : [...assetTypes, nextAssetType],
+    );
+    setEditing(null);
+  };
+
+  const createAssetType = () => {
+    setEditing({
+      id: `asset-type-${Date.now()}`,
+      code: "NEW",
+      name: "Naujas turto tipas",
+      active: true,
+      usesQr: false,
+      usesSla: false,
+      usesPriority: false,
+      usesIssueTypes: false,
+      usesAssets: false,
+    });
+  };
+
+  return (
+    <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-xl font-bold">Asset Types</h2>
+          <p className="text-sm text-slate-500 font-medium">
+            Turto tipų foundation sluoksnis Workflow Types konfiguracijai.
+          </p>
+        </div>
+        <button
+          onClick={createAssetType}
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
+        >
+          <Plus size={16} /> Sukurti turto tipą
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
+            <tr>
+              <th className="px-4 py-3 text-left">Pavadinimas</th>
+              <th className="px-4 py-3 text-left">Kodas</th>
+              <th className="px-4 py-3 text-left">Statusas</th>
+              <th className="px-4 py-3 text-right">Veiksmai</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {assetTypes.map((assetType) => (
+              <tr key={assetType.id} className="hover:bg-slate-50/70">
+                <td className="px-4 py-3 font-bold text-slate-900">
+                  {assetType.name}
+                </td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                  {assetType.code}
+                </td>
+                <td className="px-4 py-3">
+                  <AdminActiveSwitch
+                    active={assetType.active}
+                    onClick={() =>
+                      setAssetTypes(
+                        assetTypes.map((item) =>
+                          item.id === assetType.id
+                            ? { ...item, active: !item.active }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => setEditing(assetType)}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+                    title="Redaguoti"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <AdminModal
+        title="Turto tipas"
+        isOpen={Boolean(editing)}
+        onClose={() => setEditing(null)}
+      >
+        {editing && (
+          <div className="space-y-4">
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Pavadinimas
+              </span>
+              <input
+                value={editing.name}
+                onChange={(event) =>
+                  setEditing({ ...editing, name: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Kodas
+              </span>
+              <input
+                value={editing.code}
+                onChange={(event) =>
+                  setEditing({ ...editing, code: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setEditing(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold"
+              >
+                Atšaukti
+              </button>
+              <button
+                onClick={saveAssetType}
+                className="px-4 py-2 rounded-xl bg-black text-white text-sm font-bold"
+              >
+                Išsaugoti
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminModal>
+    </div>
+  );
+}
+
+function AssetObjectsAdmin({
+  assetTypes,
+  assetObjects,
+  setAssetObjects,
+  clubs,
+}: {
+  assetTypes: AssetType[];
+  assetObjects: AssetObject[];
+  setAssetObjects: React.Dispatch<React.SetStateAction<AssetObject[]>>;
+  clubs: Club[];
+}) {
+  const [editing, setEditing] = useState<AssetObject | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const defaultAssetTypeId =
+    assetTypes.find((assetType) => assetType.usesAssets)?.id ||
+    assetTypes[0]?.id ||
+    "asset-type-equipment";
+  const getAssetTypeLabel = (assetTypeId: string) =>
+    assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
+    assetTypeId;
+  const getClubLabel = (clubId?: string) =>
+    clubId ? clubs.find((club) => club.id === clubId)?.name || clubId : "-";
+  const filteredObjects = assetObjects.filter((object) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      object.name.toLowerCase().includes(query) ||
+      object.code.toLowerCase().includes(query) ||
+      getAssetTypeLabel(object.assetTypeId).toLowerCase().includes(query)
+    );
+  });
+
+  const saveAssetObject = () => {
+    if (!editing || !editing.name.trim()) return;
+
+    const exists = assetObjects.some((object) => object.id === editing.id);
+    const club = clubs.find((candidate) => candidate.id === editing.clubId);
+    const nextObject: AssetObject = {
+      ...editing,
+      id:
+        editing.id ||
+        `asset-object-${editing.assetTypeId}-${Date.now()}`,
+      code: editing.code.trim() || editing.name.trim(),
+      name: editing.name.trim(),
+      active: editing.active !== false,
+      regionId: club?.region || editing.regionId,
+    };
+
+    setAssetObjects(
+      exists
+        ? assetObjects.map((object) =>
+            object.id === editing.id ? nextObject : object,
+          )
+        : [...assetObjects, nextObject],
+    );
+    setEditing(null);
+  };
+
+  const createAssetObject = () => {
+    setEditing({
+      id: `asset-object-${Date.now()}`,
+      assetTypeId: defaultAssetTypeId,
+      code: "NEW",
+      name: "Naujas turto objektas",
+      active: true,
+      clubId: "",
+      regionId: "",
+      qrUrl: "",
+      metadata: {},
+    });
+  };
+
+  return (
+    <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 w-full md:w-auto">
+          <h2 className="text-xl font-bold">Turto objektai</h2>
+          <div className="relative w-full md:w-64">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              size={16}
+            />
+            <input
+              type="text"
+              placeholder="Ieškoti objekto..."
+              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          </div>
+        </div>
+        <button
+          onClick={createAssetObject}
+          className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
+        >
+          <Plus size={16} /> Sukurti objektą
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
+            <tr>
+              <th className="px-4 py-3 text-left">Pavadinimas</th>
+              <th className="px-4 py-3 text-left">Turto tipas</th>
+              <th className="px-4 py-3 text-left">Kodas</th>
+              <th className="px-4 py-3 text-left">Klubas</th>
+              <th className="px-4 py-3 text-left">Statusas</th>
+              <th className="px-4 py-3 text-right">Veiksmai</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filteredObjects.map((object) => (
+              <tr key={object.id} className="hover:bg-slate-50/70">
+                <td className="px-4 py-3 font-bold text-slate-900">
+                  {object.name}
+                </td>
+                <td className="px-4 py-3 font-semibold text-slate-600">
+                  {getAssetTypeLabel(object.assetTypeId)}
+                </td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-500">
+                  {object.code}
+                </td>
+                <td className="px-4 py-3 text-slate-600">
+                  {getClubLabel(object.clubId)}
+                </td>
+                <td className="px-4 py-3">
+                  <AdminActiveSwitch
+                    active={object.active !== false}
+                    onClick={() =>
+                      setAssetObjects(
+                        assetObjects.map((item) =>
+                          item.id === object.id
+                            ? { ...item, active: item.active === false }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => setEditing(object)}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+                    title="Redaguoti"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {filteredObjects.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="py-8 text-center text-slate-500 font-medium"
+                >
+                  Nerasta rezultatų
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <AdminModal
+        title="Turto objektas"
+        isOpen={Boolean(editing)}
+        onClose={() => setEditing(null)}
+      >
+        {editing && (
+          <div className="space-y-4">
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Turto tipas
+              </span>
+              <select
+                value={editing.assetTypeId}
+                onChange={(event) =>
+                  setEditing({ ...editing, assetTypeId: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              >
+                {assetTypes
+                  .filter(
+                    (assetType) =>
+                      assetType.usesAssets ||
+                      assetType.id === editing.assetTypeId,
+                  )
+                  .map((assetType) => (
+                    <option key={assetType.id} value={assetType.id}>
+                      {assetType.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Pavadinimas
+              </span>
+              <input
+                value={editing.name}
+                onChange={(event) =>
+                  setEditing({ ...editing, name: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  Kodas
+                </span>
+                <input
+                  value={editing.code}
+                  onChange={(event) =>
+                    setEditing({ ...editing, code: event.target.value })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  Klubas
+                </span>
+                <select
+                  value={editing.clubId || ""}
+                  onChange={(event) => {
+                    const club = clubs.find(
+                      (candidate) => candidate.id === event.target.value,
+                    );
+                    setEditing({
+                      ...editing,
+                      clubId: event.target.value || undefined,
+                      regionId: club?.region || undefined,
+                    });
+                  }}
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="">Be klubo</option>
+                  {clubs
+                    .filter(
+                      (club) =>
+                        club.is_active !== false ||
+                        club.id === editing.clubId,
+                    )
+                    .map((club) => (
+                      <option key={club.id} value={club.id}>
+                        {club.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                QR URL
+              </span>
+              <input
+                value={editing.qrUrl || ""}
+                onChange={(event) =>
+                  setEditing({ ...editing, qrUrl: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                placeholder="https://..."
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setEditing(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold"
+              >
+                Atšaukti
+              </button>
+              <button
+                onClick={saveAssetObject}
+                className="px-4 py-2 rounded-xl bg-black text-white text-sm font-bold"
+              >
+                Išsaugoti
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminModal>
+    </div>
+  );
+}
+
+function AssetIssueTypesAdmin({
+  assetTypes,
+  issueTypes,
+  setIssueTypes,
+}: {
+  assetTypes: AssetType[];
+  issueTypes: AssetIssueType[];
+  setIssueTypes: React.Dispatch<React.SetStateAction<AssetIssueType[]>>;
+}) {
+  const [editing, setEditing] = useState<AssetIssueType | null>(null);
+  const defaultAssetTypeId =
+    assetTypes.find((assetType) => assetType.code === "EQUIPMENT")?.id ||
+    assetTypes[0]?.id ||
+    "asset-type-equipment";
+  const getAssetTypeLabel = (assetTypeId: string) =>
+    assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
+    assetTypeId;
+
+  const saveIssueType = () => {
+    if (!editing) return;
+
+    const exists = issueTypes.some((issueType) => issueType.id === editing.id);
+    const nextIssueType: AssetIssueType = {
+      ...editing,
+      id:
+        editing.id ||
+        `asset-issue-${editing.assetTypeId}-${Date.now()}`,
+      code:
+        editing.code.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_") ||
+        editing.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_"),
+      name: editing.name.trim() || editing.code.trim(),
+      slaHours: Number(editing.slaHours) || 24,
+    };
+
+    setIssueTypes(
+      exists
+        ? issueTypes.map((issueType) =>
+            issueType.id === editing.id ? nextIssueType : issueType,
+          )
+        : [...issueTypes, nextIssueType],
+    );
+    setEditing(null);
+  };
+
+  const createIssueType = () => {
+    setEditing({
+      id: `asset-issue-${Date.now()}`,
+      assetTypeId: defaultAssetTypeId,
+      code: "NEW",
+      name: "Naujas gedimo tipas",
+      active: true,
+      isDefault: false,
+      priority: "medium",
+      slaHours: 24,
+      legacySource: "equipmentIssueTypesList",
+      legacyId: `asset-${Date.now()}`,
+    });
+  };
+
+  return (
+    <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-xl font-bold">Asset Issue Types</h2>
+          <p className="text-sm text-slate-500 font-medium">
+            Foundation sluoksnis būsimam SLA ir prioriteto valdymui per turto tipus.
+          </p>
+        </div>
+        <button
+          onClick={createIssueType}
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
+        >
+          <Plus size={16} /> Sukurti gedimo tipą
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
+            <tr>
+              <th className="px-4 py-3 text-left">Pavadinimas</th>
+              <th className="px-4 py-3 text-left">Turto tipas</th>
+              <th className="px-4 py-3 text-left">Prioritetas</th>
+              <th className="px-4 py-3 text-left">SLA</th>
+              <th className="px-4 py-3 text-left">Default</th>
+              <th className="px-4 py-3 text-left">Statusas</th>
+              <th className="px-4 py-3 text-right">Veiksmai</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {issueTypes.map((issueType) => (
+              <tr key={issueType.id} className="hover:bg-slate-50/70">
+                <td className="px-4 py-3">
+                  <div className="font-bold text-slate-900">
+                    {issueType.name}
+                  </div>
+                  <div className="font-mono text-[11px] text-slate-400">
+                    {issueType.code}
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-semibold text-slate-600">
+                  {getAssetTypeLabel(issueType.assetTypeId)}
+                </td>
+                <td className="px-4 py-3 font-bold uppercase text-slate-600">
+                  {issueType.priority}
+                </td>
+                <td className="px-4 py-3 font-bold text-slate-600">
+                  {issueType.slaHours}h
+                </td>
+                <td className="px-4 py-3">
+                  {issueType.isDefault ? "Taip" : "Ne"}
+                </td>
+                <td className="px-4 py-3">
+                  <AdminActiveSwitch
+                    active={issueType.active}
+                    onClick={() =>
+                      setIssueTypes(
+                        issueTypes.map((item) =>
+                          item.id === issueType.id
+                            ? { ...item, active: !item.active }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => setEditing(issueType)}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+                    title="Redaguoti"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <AdminModal
+        title="Asset Issue Type"
+        isOpen={Boolean(editing)}
+        onClose={() => setEditing(null)}
+      >
+        {editing && (
+          <div className="space-y-4">
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Turto tipas
+              </span>
+              <select
+                value={editing.assetTypeId}
+                onChange={(event) =>
+                  setEditing({ ...editing, assetTypeId: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              >
+                {assetTypes
+                  .filter(
+                    (assetType) =>
+                      assetType.usesIssueTypes ||
+                      assetType.id === editing.assetTypeId,
+                  )
+                  .map((assetType) => (
+                    <option key={assetType.id} value={assetType.id}>
+                      {assetType.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Pavadinimas
+              </span>
+              <input
+                value={editing.name}
+                onChange={(event) =>
+                  setEditing({ ...editing, name: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Kodas
+              </span>
+              <input
+                value={editing.code}
+                onChange={(event) =>
+                  setEditing({ ...editing, code: event.target.value })
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  Prioritetas
+                </span>
+                <select
+                  value={editing.priority}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      priority: event.target.value as AssetIssueType["priority"],
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  SLA val.
+                </span>
+                <input
+                  type="number"
+                  value={editing.slaHours}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      slaHours: Number(event.target.value),
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                />
+              </label>
+            </div>
+
+            <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
+              <input
+                type="checkbox"
+                checked={editing.isDefault}
+                onChange={(event) =>
+                  setEditing({ ...editing, isDefault: event.target.checked })
+                }
+              />
+              Default gedimo tipas
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setEditing(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-bold"
+              >
+                Atšaukti
+              </button>
+              <button
+                onClick={saveIssueType}
+                className="px-4 py-2 rounded-xl bg-black text-white text-sm font-bold"
+              >
+                Išsaugoti
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminModal>
+    </div>
+  );
+}
+
 function WorkflowTypesAdmin({
   workflows,
   setWorkflows,
+  users,
+  assetTypes,
 }: {
   workflows: WorkflowType[];
   setWorkflows?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
+  users: User[];
+  assetTypes: AssetType[];
 }) {
   const [editing, setEditing] = useState<WorkflowType | null>(null);
+  const activeUsers = useMemo(
+    () => users.filter((user) => user.is_active !== false),
+    [users],
+  );
+  const getOwnerLabel = useCallback(
+    (ownerUserId?: string | null) => {
+      if (!ownerUserId) return "No owner";
+      return users.find((user) => user.id === ownerUserId)?.name || ownerUserId;
+    },
+    [users],
+  );
+  const getAssetTypeLabel = (assetTypeId?: string) =>
+    assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
+    "Bendrinis";
+  const defaultAssetTypeId =
+    assetTypes.find((assetType) => assetType.code === "GENERIC")?.id ||
+    assetTypes[0]?.id ||
+    "asset-type-generic";
 
   const saveWorkflow = () => {
     if (!editing || !setWorkflows) return;
@@ -1948,6 +2736,11 @@ function WorkflowTypesAdmin({
       priorities: editing.priorities.length
         ? editing.priorities
         : initialWorkflowTypes[0].priorities,
+      objectType: editing.objectType || "GENERIC",
+      assetTypeId: editing.assetTypeId || defaultAssetTypeId,
+      qrMode: editing.qrMode || "OFF",
+      usesScope: editing.usesScope ?? false,
+      ownerUserId: editing.ownerUserId ?? null,
       kanbanSettings: {
         ...editing.kanbanSettings,
         lanes: editing.statuses.map((status) => status.id),
@@ -1976,6 +2769,11 @@ function WorkflowTypesAdmin({
       icon: "AlertCircle",
       category: "DARBAI",
       enabled: true,
+      objectType: "GENERIC",
+      assetTypeId: defaultAssetTypeId,
+      qrMode: "OFF",
+      usesScope: false,
+      ownerUserId: null,
       linkedConfigs: {},
       templates: [],
     });
@@ -2042,20 +2840,28 @@ function WorkflowTypesAdmin({
 
               <div className="grid grid-cols-2 gap-2 text-[11px] font-bold">
                 <div className="bg-slate-50 rounded-xl p-3">
-                  <span className="block text-slate-400 uppercase">Category</span>
-                  {workflow.category}
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3">
-                  <span className="block text-slate-400 uppercase">SLA</span>
-                  {workflow.slaRules.defaultHours}h
+                  <span className="block text-slate-400 uppercase">
+                    Turto tipas
+                  </span>
+                  {getAssetTypeLabel(workflow.assetTypeId)}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3">
                   <span className="block text-slate-400 uppercase">Statuses</span>
                   {workflow.statuses.length}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3">
-                  <span className="block text-slate-400 uppercase">Roles</span>
-                  {workflow.allowedRoles.length}
+                  <span className="block text-slate-400 uppercase">QR</span>
+                  {workflow.qrMode || "OFF"}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">Scope</span>
+                  {workflow.usesScope ? "ON" : "OFF"}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">Owner</span>
+                  <span className="block truncate">
+                    {getOwnerLabel(workflow.ownerUserId)}
+                  </span>
                 </div>
               </div>
 
@@ -2141,46 +2947,78 @@ function WorkflowTypesAdmin({
               />
             </label>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <label className="block space-y-1">
                 <span className="text-[11px] font-black uppercase text-slate-400">
-                  Grupe
+                  Turto tipas
                 </span>
                 <select
-                  value={editing.category}
+                  value={editing.assetTypeId || defaultAssetTypeId}
                   onChange={(event) =>
                     setEditing({
                       ...editing,
-                      category: event.target.value as WorkflowType["category"],
+                      assetTypeId: event.target.value,
                     })
                   }
                   className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
                 >
-                  <option value="DARBAI">Darbai</option>
-                  <option value="KONTROLE">Kontrole</option>
-                  <option value="UZSAKYMAI">Uzsakymai</option>
-                  <option value="IDEJOS">Idejos</option>
+                  {assetTypes
+                    .filter(
+                      (assetType) =>
+                        assetType.active ||
+                        assetType.id === editing.assetTypeId,
+                    )
+                    .map((assetType) => (
+                      <option key={assetType.id} value={assetType.id}>
+                        {assetType.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">
+                  QR Mode
+                </span>
+                <select
+                  value={editing.qrMode || "OFF"}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      qrMode: event.target.value as WorkflowType["qrMode"],
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="OFF">OFF</option>
+                  <option value="GENERIC">GENERIC</option>
+                  <option value="ASSET_BASED">ASSET_BASED</option>
                 </select>
               </label>
 
               <label className="block space-y-1">
                 <span className="text-[11px] font-black uppercase text-slate-400">
-                  SLA val.
+                  Owner
                 </span>
-                <input
-                  type="number"
-                  value={editing.slaRules.defaultHours}
+                <select
+                  value={editing.ownerUserId || ""}
                   onChange={(event) =>
                     setEditing({
                       ...editing,
-                      slaRules: {
-                        ...editing.slaRules,
-                        defaultHours: Number(event.target.value),
-                      },
+                      ownerUserId: event.target.value || null,
                     })
                   }
                   className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
-                />
+                >
+                  <option value="">No owner</option>
+                  {activeUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
 
@@ -2209,24 +3047,49 @@ function WorkflowTypesAdmin({
               />
             </label>
 
-            <label className="block space-y-1">
-              <span className="text-[11px] font-black uppercase text-slate-400">
-                Leistinos roles
-              </span>
-              <input
-                value={editing.allowedRoles.join(", ")}
-                onChange={(event) =>
-                  setEditing({
-                    ...editing,
-                    allowedRoles: event.target.value
-                      .split(",")
-                      .map((value) => value.trim())
-                      .filter(Boolean),
-                  })
-                }
-                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
-              />
-            </label>
+            <div className="rounded-xl bg-slate-50 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-black uppercase text-slate-400">
+                    Uses Region / Club Scope
+                  </p>
+                  <p className="text-xs font-semibold text-slate-500">
+                    {editing.usesScope
+                      ? "Workflow uses region/club filtering and routing."
+                      : "Workflow is global. Examples: Marketing, Camera Monitoring, IT."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={editing.usesScope}
+                  onClick={() =>
+                    setEditing({ ...editing, usesScope: !editing.usesScope })
+                  }
+                  className={cn(
+                    "shrink-0 px-3 py-2 rounded-xl border text-xs font-black transition-colors flex items-center gap-3",
+                    editing.usesScope
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-slate-100 text-slate-500 border-slate-200",
+                  )}
+                >
+                  <span>{editing.usesScope ? "ON" : "OFF"}</span>
+                  <span
+                    className={cn(
+                      "relative inline-flex h-5 w-9 rounded-full transition-colors",
+                      editing.usesScope ? "bg-emerald-500" : "bg-slate-300",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                        editing.usesScope ? "translate-x-4" : "translate-x-0.5",
+                      )}
+                    />
+                  </span>
+                </button>
+              </div>
+            </div>
 
             <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
               <input
@@ -4705,36 +5568,91 @@ function EquipmentAdmin({
 }
 
 function EquipmentIssuesAdmin({
-  issues,
-  setIssues,
+  assetTypes,
+  issueTypes,
+  setIssueTypes,
 }: {
-  issues: any[];
-  setIssues: any;
+  assetTypes: AssetType[];
+  issueTypes: AssetIssueType[];
+  setIssueTypes: React.Dispatch<React.SetStateAction<AssetIssueType[]>>;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const equipmentAssetTypeId =
+    assetTypes.find((assetType) => assetType.code === "EQUIPMENT")?.id ||
+    "asset-type-equipment";
+  const facilityAssetTypeId =
+    assetTypes.find((assetType) => assetType.code === "FACILITY")?.id ||
+    "asset-type-facility";
+  const issues = useMemo(() => getLegacyIssueTypes(issueTypes), [issueTypes]);
 
   const filteredIssues = issues.filter((iss) =>
     iss.name.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   const handleSave = () => {
-    if (editing.id) {
-      if (issues.find((c) => c.id === editing.id)) {
-        setIssues(
-          issues.map((c: any) =>
-            c.id === editing.id ? { ...c, ...editing } : c,
-          ),
-        );
+    if (!editing.id || !editing.name?.trim()) return;
+
+    const targetAssetTypeIds =
+      editing.applies_to === "EQUIPMENT"
+        ? [equipmentAssetTypeId]
+        : editing.applies_to === "FACILITY"
+          ? [facilityAssetTypeId]
+          : [equipmentAssetTypeId, facilityAssetTypeId];
+    const existingByAssetType = new Map(
+      issueTypes
+        .filter((issueType) => issueType.legacyId === editing.id)
+        .map((issueType) => [issueType.assetTypeId, issueType]),
+    );
+    const code =
+      editing.name
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_|_$/g, "") || editing.id.toUpperCase();
+    const nextIssueTypes = [
+      ...issueTypes.filter(
+        (issueType) =>
+          issueType.legacyId !== editing.id ||
+          targetAssetTypeIds.includes(issueType.assetTypeId),
+      ),
+    ];
+
+    targetAssetTypeIds.forEach((assetTypeId) => {
+      const existing = existingByAssetType.get(assetTypeId);
+      const nextIssueType: AssetIssueType = {
+        ...(existing || {
+          id: `asset-issue-${assetTypeId}-${editing.id}`,
+          legacySource: "equipmentIssueTypesList" as const,
+          legacyId: editing.id,
+          active: true,
+          isDefault: false,
+        }),
+        assetTypeId,
+        code,
+        name: editing.name.trim(),
+        priority: editing.priority || "medium",
+        slaHours: Number(editing.sla_hours) || 24,
+      };
+      const index = nextIssueTypes.findIndex(
+        (issueType) => issueType.id === nextIssueType.id,
+      );
+      if (index >= 0) {
+        nextIssueTypes[index] = nextIssueType;
       } else {
-        setIssues([
-          ...issues,
-          { ...editing, id: editing.id || generateUniqueId("ei") },
-        ]);
+        nextIssueTypes.push(nextIssueType);
       }
-    }
+    });
+
+    setIssueTypes(nextIssueTypes);
     setModalOpen(false);
+  };
+
+  const handleDelete = (legacyId: string) => {
+    setIssueTypes(
+      issueTypes.filter((issueType) => issueType.legacyId !== legacyId),
+    );
   };
 
   return (
@@ -4811,9 +5729,7 @@ function EquipmentIssuesAdmin({
                       <Edit2 size={16} />
                     </button>
                     <button
-                      onClick={() =>
-                        setIssues(issues.filter((x: any) => x.id !== iss.id))
-                      }
+                      onClick={() => handleDelete(iss.id)}
                       className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
                     >
                       <Trash2 size={16} />
@@ -4865,7 +5781,7 @@ function EquipmentIssuesAdmin({
                   <Edit2 size={16} />
                 </button>
                 <button
-                  onClick={() => setIssues(issues.filter((x: any) => x.id !== iss.id))}
+                  onClick={() => handleDelete(iss.id)}
                   className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
                 >
                   <Trash2 size={16} />

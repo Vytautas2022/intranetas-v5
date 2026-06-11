@@ -1,11 +1,24 @@
 import { Fault, Status, FaultComment } from '../types/faults';
-import { qrEquipment, qrLocations } from '../mock-db/qr-mapping';
 import { clubs } from '../mock-db/clubs';
-import { equipmentList as adminEquipment } from '../mock-db/admin';
+import {
+  getEquipmentAssetObjects,
+  getFacilityAssetObjects,
+} from '../mock-db/assetObjects';
 import { generateUniqueId, generateId } from './idLogic';
-import { findActiveEquipmentFault, getEquipmentIdentityFields } from './equipmentFaultIdentity';
-import { getDefaultEquipmentIssueTypeForQr } from './equipmentIssueTypeLogic';
+import { getEquipmentIdentityFields, getFaultEquipmentId } from './equipmentFaultIdentity';
+import {
+  getDefaultEquipmentIssueTypeForQr,
+  getDefaultFacilityIssueTypeForQr,
+} from './equipmentIssueTypeLogic';
+import {
+  getFacilityAssetObjectIdFromLegacy,
+  getFaultFacilityAssetObjectId,
+} from './facilityFaultIdentity';
 import { getSlaDeadline } from './slaEngine';
+import type { WorkflowObjectType, WorkflowType } from '../mock-db/workflowTypes';
+
+const adminEquipment = getEquipmentAssetObjects();
+const facilityObjects = getFacilityAssetObjects();
 
 export interface QrReportInput {
   equipment_id?: string;
@@ -20,27 +33,99 @@ export interface QrReportResult {
   newTask?: Fault;
 }
 
+const activeQrStatuses = [Status.NEW, Status.IN_PROGRESS, Status.WAITING_DETAILS];
+
+const getQrObjectType = (input: QrReportInput): WorkflowObjectType => {
+  if (input.equipment_id) return "EQUIPMENT";
+  if (input.location_id) return "FACILITY";
+  return "GENERIC";
+};
+
+const isWorkflowEnabled = (workflow: WorkflowType): boolean =>
+  Boolean(workflow.active ?? workflow.enabled);
+
+export const getQrWorkflow = (
+  input: QrReportInput,
+  workflowTypes: WorkflowType[],
+): WorkflowType | undefined => {
+  const objectType = getQrObjectType(input);
+
+  return workflowTypes.find(
+    (workflow) =>
+      isWorkflowEnabled(workflow) &&
+      workflow.objectType === objectType &&
+      workflow.qrMode !== "OFF",
+  );
+};
+
+const isSameWorkflow = (task: Fault, workflow: WorkflowType): boolean =>
+  !task.workflowTypeId || task.workflowTypeId === workflow.id;
+
+export const findActiveQrAssetTask = (
+  allTasks: Fault[],
+  input: QrReportInput,
+  workflow: WorkflowType,
+): Fault | undefined => {
+  if (workflow.qrMode !== "ASSET_BASED") return undefined;
+
+  if (workflow.objectType === "EQUIPMENT" && input.equipment_id) {
+    return allTasks.find(
+      (task) =>
+        task.entityType === "fault" &&
+        isSameWorkflow(task, workflow) &&
+        getFaultEquipmentId(task) === input.equipment_id &&
+        activeQrStatuses.includes(task.status as Status),
+    );
+  }
+
+  if (workflow.objectType === "FACILITY" && input.location_id) {
+    const assetObjectId = getFacilityAssetObjectIdFromLegacy(input.location_id);
+
+    return allTasks.find(
+      (task) =>
+        task.entityType === "fault" &&
+        isSameWorkflow(task, workflow) &&
+        getFaultFacilityAssetObjectId(task) === assetObjectId &&
+        activeQrStatuses.includes(task.status as Status),
+    );
+  }
+
+  return undefined;
+};
+
+const getCompatibilityTaskType = (workflow: WorkflowType): string => {
+  if (workflow.objectType === "EQUIPMENT") return "EQUIPMENT_FAULT";
+  if (workflow.objectType === "FACILITY") return "FACILITY_FAULT";
+  if (workflow.objectType === "ORDER") return "ORDER";
+  return workflow.id;
+};
+
 export function handleQrReport(
   input: QrReportInput,
   allTasks: Fault[],
-  currentUser: { name: string; id: string }
+  currentUser: { name: string; id: string },
+  workflowTypes: WorkflowType[],
 ): QrReportResult {
   const now = Date.now();
-  
-  // 1. Deduplication
-  let existingTask: Fault | undefined;
-  
-  if (input.equipment_id) {
-    existingTask = findActiveEquipmentFault(allTasks, input.equipment_id);
-  } else if (input.location_id) {
-    const activeStatuses = [Status.NEW, Status.IN_PROGRESS, Status.WAITING_DETAILS];
-    existingTask = allTasks.find(t => 
-      t.entityType === 'fault' &&
-      t.type === 'FACILITY_FAULT' &&
-      t.location_id === input.location_id &&
-      activeStatuses.includes(t.status as Status)
-    );
+
+  const workflow = getQrWorkflow(input, workflowTypes);
+
+  if (!workflow || workflow.qrMode === "OFF") {
+    return {
+      success: false,
+      message: "QR registracija šiam workflow neleidžiama.",
+    };
   }
+
+  if (workflow.objectType === "ORDER") {
+    return {
+      success: false,
+      message: "Užsakymų QR registracija MVP versijoje neleidžiama.",
+    };
+  }
+
+  // 1. Asset deduplication
+  const existingTask = findActiveQrAssetTask(allTasks, input, workflow);
 
   if (existingTask) {
     // Add comment to existing task
@@ -58,6 +143,7 @@ export function handleQrReport(
 
     const updatedTask: Fault = {
       ...existingTask,
+      workflowTypeId: existingTask.workflowTypeId || workflow.id,
       comments: [...existingTask.comments, newComment],
       repeat_count: (existingTask.repeat_count || 0) + 1,
       updatedAt: now,
@@ -74,55 +160,83 @@ export function handleQrReport(
   // 2. Create new task
   let clubId = '';
   let title = '';
-  let type = '';
+  const compatibilityTaskType = getCompatibilityTaskType(workflow);
 
-  if (input.equipment_id) {
-    // Search in both mapping and admin list
-    let eq: any = qrEquipment.find(e => e.id === input.equipment_id);
-    if (!eq) {
-      const adminEq = adminEquipment.find(e => e.id === input.equipment_id);
-      if (adminEq) {
-        eq = {
-          id: adminEq.id,
-          name: adminEq.name,
-          number: adminEq.number,
-          clubId: adminEq.club_id
-        };
-      }
+  if (
+    workflow.qrMode === "ASSET_BASED" &&
+    workflow.objectType === "EQUIPMENT" &&
+    input.equipment_id
+  ) {
+    const adminEq = adminEquipment.find(e => e.id === input.equipment_id);
+    let eq: any = null;
+    if (adminEq) {
+      eq = {
+        id: adminEq.id,
+        name: adminEq.name,
+        number: adminEq.number,
+        clubId: adminEq.club_id
+      };
     }
 
     if (eq) {
       clubId = eq.clubId;
       title = `${eq.name} (${eq.number})`;
-      type = 'EQUIPMENT_FAULT';
     }
-  } else if (input.location_id) {
-    const loc = qrLocations.find(l => l.id === input.location_id);
+  } else if (
+    workflow.qrMode === "ASSET_BASED" &&
+    workflow.objectType === "FACILITY" &&
+    input.location_id
+  ) {
+    const loc = facilityObjects.find(l => l.id === input.location_id);
     if (loc) {
-      clubId = loc.clubId;
+      clubId = loc.clubId || loc.club_id || '';
       title = loc.name;
-      type = 'FACILITY_FAULT';
     }
+  } else if (workflow.qrMode === "GENERIC") {
+    title = workflow.name || 'QR PraneÅ¡imas';
   }
 
-  if (!clubId) {
+  if (workflow.qrMode === "ASSET_BASED" && !clubId) {
     return { success: false, message: "Nerastas objektas pagal nurodytą ID." };
   }
 
   const club = clubs.find(c => c.id === clubId);
   const clubName = club ? club.name : clubId;
-  const equipmentIssueType =
-    type === 'EQUIPMENT_FAULT' ? getDefaultEquipmentIssueTypeForQr() : null;
+  const assetIssueType =
+    workflow.qrMode === "ASSET_BASED" && workflow.objectType === "EQUIPMENT"
+      ? getDefaultEquipmentIssueTypeForQr()
+      : workflow.qrMode === "ASSET_BASED" && workflow.objectType === "FACILITY"
+        ? getDefaultFacilityIssueTypeForQr()
+        : null;
 
-  if (type === 'EQUIPMENT_FAULT' && !equipmentIssueType) {
+  if (
+    workflow.qrMode === "ASSET_BASED" &&
+    workflow.objectType === "EQUIPMENT" &&
+    !assetIssueType
+  ) {
     return {
       success: false,
       message: "Nerastas aktyvus treniruoklio gedimo tipas QR registracijai.",
     };
   }
 
-  const slaHours = equipmentIssueType?.sla_hours ?? 24;
-  const priority = equipmentIssueType?.priority ?? 'medium';
+  if (
+    workflow.qrMode === "ASSET_BASED" &&
+    workflow.objectType === "FACILITY" &&
+    !assetIssueType
+  ) {
+    return {
+      success: false,
+      message: "Nerastas aktyvus patalpų gedimo tipas QR registracijai.",
+    };
+  }
+
+  const slaHours = assetIssueType?.sla_hours ?? 24;
+  const priority = assetIssueType?.priority ?? 'medium';
+  const facilityAssetObjectId =
+    workflow.objectType === "FACILITY"
+      ? getFacilityAssetObjectIdFromLegacy(input.location_id)
+      : undefined;
 
   const newTask: Fault = {
     id: generateUniqueId('f'),
@@ -131,8 +245,10 @@ export function handleQrReport(
     clubId,
     clubName,
     status: Status.NEW,
-    type,
+    type: compatibilityTaskType,
     entityType: 'fault',
+    workflowTypeId: workflow.id,
+    category: compatibilityTaskType,
     createdAt: now,
     updatedAt: now,
     assigneeId: '',
@@ -149,8 +265,9 @@ export function handleQrReport(
     updatedBy: currentUser.name,
     code: generateId(),
     ...getEquipmentIdentityFields(input.equipment_id),
-    issue_type_id: equipmentIssueType?.id,
-    typeId: equipmentIssueType?.id,
+    assetObjectId: facilityAssetObjectId,
+    issue_type_id: assetIssueType?.id,
+    typeId: assetIssueType?.id,
     location_id: input.location_id,
     repeat_count: 0,
     history: [

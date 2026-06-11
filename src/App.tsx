@@ -197,19 +197,29 @@ import {
 import { calculateAnalytics } from "./logic/analytics";
 import { AnalyticsTab } from "./components/AnalyticsTab";
 import { mockTasks } from "./mock-db/tasks";
-import { qrEquipment, qrLocations } from "./mock-db/qr-mapping";
-import { handleQrReport } from "./logic/qrLogic";
+import { qrEquipment } from "./mock-db/qr-mapping";
+import {
+  findActiveQrAssetTask,
+  getQrWorkflow,
+  handleQrReport,
+} from "./logic/qrLogic";
 import {
   findActiveEquipmentFault,
   getEquipmentIdentityFields,
   getFaultEquipmentId,
 } from "./logic/equipmentFaultIdentity";
+import {
+  findActiveFacilityFault,
+  getFacilityAssetObjectIdFromLegacy,
+  getFacilityIdentityFields,
+} from "./logic/facilityFaultIdentity";
 import { AdminModule } from "./components/AdminModule";
 import { OpsFlowView } from "./components/OpsFlowView";
 import { EquipmentSearchModal } from "./components/EquipmentSearchModal";
 import {
   workflowTypes as initialWorkflowTypes,
   getWorkflowTypeByLegacyCategory,
+  type WorkflowObjectType,
   WorkflowType,
 } from "./mock-db/workflowTypes";
 import {
@@ -258,9 +268,6 @@ import { migrateExcelToPeriodic } from "./logic/periodicExcelMigration";
 
 import { suppliersList } from "./mock-db/suppliers";
 import {
-  facilityTemplates,
-  equipmentList,
-  equipmentIssueTypesList,
   Product,
   ClubInventorySetting,
   ProductCategory,
@@ -270,6 +277,11 @@ import {
   suppliersList as MOCK_SUPPLIERS,
   printMaterials,
 } from "./mock-db/admin";
+import { getLegacyIssueTypes } from "./mock-db/assetIssueTypes";
+import {
+  getEquipmentAssetObjects,
+  getFacilityAssetObjects,
+} from "./mock-db/assetObjects";
 import {
   initialFacilityInsights,
   initialEquipmentInsights,
@@ -283,6 +295,17 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/authContext";
+
+const equipmentIssueTypesList = getLegacyIssueTypes();
+const equipmentList = getEquipmentAssetObjects();
+const facilityAssetObjects = getFacilityAssetObjects();
+const facilityTemplates = facilityAssetObjects.filter(
+  (object) => !object.locationId,
+);
+const facilityLocations = facilityAssetObjects.filter(
+  (object) => object.locationId,
+);
+const facilityRegistrationObjects = facilityAssetObjects;
 import type { AuthUser } from "./auth/types";
 import {
   canAccessModule,
@@ -292,6 +315,20 @@ import {
 
 const CLUBS = clubs;
 const SUPPLIERS = MOCK_SUPPLIERS;
+
+const getWorkflowCreateModuleId = (
+  workflow?: Pick<WorkflowType, "objectType"> | null,
+): "orders" | "darbai" =>
+  workflow?.objectType === "ORDER" ? "orders" : "darbai";
+
+const getRegistrationCompatibilityCategory = (
+  workflow?: Pick<WorkflowType, "id" | "objectType"> | null,
+): string => {
+  if (workflow?.objectType === "EQUIPMENT") return "EQUIPMENT_FAULT";
+  if (workflow?.objectType === "FACILITY") return "FACILITY_FAULT";
+  if (workflow?.objectType === "ORDER") return "ORDER";
+  return workflow?.id || "GENERIC";
+};
 
 const INITIAL_FAULTS: Fault[] = MOCK_FAULTS as Fault[];
 
@@ -3221,12 +3258,14 @@ const QrReportView = ({
   allTasks,
   currentUser,
   onUpdateTasks,
+  workflowTypes,
 }: {
   params: { equipment_id?: string; location_id?: string };
   onClose: () => void;
   allTasks: Fault[];
   currentUser: { name: string; id: string };
   onUpdateTasks: (updatedTasks: Fault[]) => void;
+  workflowTypes: WorkflowType[];
 }) => {
   const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState<{
@@ -3235,39 +3274,24 @@ const QrReportView = ({
   } | null>(null);
 
   const equipment = params.equipment_id
-    ? qrEquipment.find((e) => e.id === params.equipment_id) ||
-      equipmentList.find((e) => e.id === params.equipment_id)
+    ? equipmentList.find((e) => e.id === params.equipment_id)
     : null;
   const location = params.location_id
-    ? qrLocations.find((l) => l.id === params.location_id)
+    ? facilityLocations.find((l) => l.id === params.location_id)
     : null;
 
   const existingTask = useMemo(() => {
-    if (params.equipment_id) {
-      return findActiveEquipmentFault(allTasks, params.equipment_id);
-    }
-    if (params.location_id) {
-      const activeStatuses = [
-        Status.NEW,
-        Status.IN_PROGRESS,
-        Status.WAITING_DETAILS,
-      ];
-      return allTasks.find(
-        (t) =>
-          t.entityType === "fault" &&
-          t.type === "FACILITY_FAULT" &&
-          t.location_id === params.location_id &&
-          activeStatuses.includes(t.status as Status),
-      );
-    }
+    const workflow = getQrWorkflow({ ...params, comment: "" }, workflowTypes);
+    if (workflow) return findActiveQrAssetTask(allTasks, { ...params, comment: "" }, workflow);
     return null;
-  }, [params, allTasks]);
+  }, [params, allTasks, workflowTypes]);
 
   const handleSubmit = () => {
     const result = handleQrReport(
       { ...params, comment },
       allTasks,
       currentUser,
+      workflowTypes,
     );
 
     if (result.success) {
@@ -3743,9 +3767,6 @@ function MainApp() {
     useState<any[]>(facilityTemplates);
   const [appEquipmentList, setAppEquipmentList] =
     useState<any[]>(equipmentList);
-  const [appEquipmentIssueTypes, setAppEquipmentIssueTypes] = useState<any[]>(
-    equipmentIssueTypesList,
-  );
 
   // Migration logic
   const migratedData = useMemo(() => migrateExcelToPeriodic(), []);
@@ -3986,10 +4007,7 @@ function MainApp() {
       }
     });
 
-    // 4. ISSUE TYPES
-    const issueTypesData = appEquipmentIssueTypes;
-
-    // 5. PRODUCTS: inventoryTemplates + products state
+    // 4. PRODUCTS: inventoryTemplates + products state
     const mergedProducts = [...products];
     inventoryTemplates.forEach((cat) => {
       cat.items.forEach((item) => {
@@ -4049,7 +4067,6 @@ function MainApp() {
       regionManagers: regionManagersData,
       equipment: mergedEquipment,
       facilityTemplates: extractedFacilityTemplates,
-      issueTypes: issueTypesData,
       products: mergedProducts,
       suppliers: mergedSuppliers,
       inventorySettings,
@@ -4060,7 +4077,6 @@ function MainApp() {
     appUsers,
     appEquipmentList,
     appFacilityTemplates,
-    appEquipmentIssueTypes,
     products,
     suppliers,
     inventorySettings,
@@ -4170,15 +4186,27 @@ function MainApp() {
   >({});
   const [regForm, setRegForm] = useState(DEFAULT_REG_FORM);
 
+  const selectedRegistrationWorkflow = React.useMemo(
+    () =>
+      workflowTypes.find((workflow) => workflow.id === regForm.workflowTypeId) ||
+      null,
+    [workflowTypes, regForm.workflowTypeId],
+  );
+  const registrationObjectType: WorkflowObjectType =
+    selectedRegistrationWorkflow?.objectType || "GENERIC";
+  const isEquipmentRegistration = registrationObjectType === "EQUIPMENT";
+  const isFacilityRegistration = registrationObjectType === "FACILITY";
+  const isOrderRegistration = registrationObjectType === "ORDER";
+  const isGenericRegistration = registrationObjectType === "GENERIC";
+  const isAssetRegistration =
+    isEquipmentRegistration || isFacilityRegistration;
+
   const currentAdminTemplate = React.useMemo(() => {
-    if (
-      regForm.category === "FACILITY_FAULT" ||
-      regForm.category === "EQUIPMENT_FAULT"
-    ) {
+    if (isAssetRegistration) {
       return equipmentIssueTypesList.find((i) => i.id === regForm.typeId);
     }
     return null;
-  }, [regForm.category, regForm.typeId]);
+  }, [isAssetRegistration, regForm.typeId]);
 
   const currentSLA = React.useMemo(() => {
     if (regForm.typeId === "other") {
@@ -4192,25 +4220,25 @@ function MainApp() {
     );
     if (issueType) return issueType.sla_hours;
 
-    if (regForm.category === "FACILITY_FAULT") {
-      const template = facilityTemplates.find(
+    if (isFacilityRegistration) {
+      const template = facilityRegistrationObjects.find(
         (t) => t.id === regForm.equipmentId,
       );
       if (template) return template.sla_hours;
     }
 
     return getFaultMeta(regForm.typeId)?.sla || 72;
-  }, [regForm, currentAdminTemplate]);
+  }, [regForm, currentAdminTemplate, isFacilityRegistration]);
 
   const displayedIssueTypes = React.useMemo(() => {
-    if (regForm.category === "FACILITY_FAULT") {
+    if (isFacilityRegistration) {
       return equipmentIssueTypesList.filter(
         (t) =>
           t.applies_to === "FACILITY" ||
           t.applies_to === "BOTH" ||
           !t.applies_to,
       );
-    } else if (regForm.category === "EQUIPMENT_FAULT") {
+    } else if (isEquipmentRegistration) {
       return equipmentIssueTypesList.filter(
         (t) =>
           t.applies_to === "EQUIPMENT" ||
@@ -4219,14 +4247,14 @@ function MainApp() {
       );
     }
     return faultTypes;
-  }, [regForm.category]);
+  }, [isEquipmentRegistration, isFacilityRegistration]);
 
   const displayedEquipmentOptions = React.useMemo(() => {
-    if (regForm.category === "FACILITY_FAULT") {
-      return facilityTemplates.filter(
+    if (isFacilityRegistration) {
+      return facilityRegistrationObjects.filter(
         (t) => t.club_id === null || t.club_id === regForm.clubId,
       );
-    } else if (regForm.category === "EQUIPMENT_FAULT") {
+    } else if (isEquipmentRegistration) {
       let options = equipmentList
         .filter((e) => e.club_id === regForm.clubId && e.is_active !== false)
         .filter(
@@ -4243,7 +4271,12 @@ function MainApp() {
       return options;
     }
     return [];
-  }, [regForm.category, regForm.clubId, equipmentSearchQuery]);
+  }, [
+    isEquipmentRegistration,
+    isFacilityRegistration,
+    regForm.clubId,
+    equipmentSearchQuery,
+  ]);
 
   // Calculate SLA and Priority
   React.useEffect(() => {
@@ -4281,8 +4314,8 @@ function MainApp() {
           priority: currentAdminTemplate.priority as Priority,
         }));
       }
-    } else if (regForm.category === "FACILITY_FAULT") {
-      const template = facilityTemplates.find(
+    } else if (isFacilityRegistration) {
+      const template = facilityRegistrationObjects.find(
         (t) => t.id === regForm.equipmentId,
       );
       if (template && template.priority !== regForm.priority) {
@@ -4291,7 +4324,7 @@ function MainApp() {
           priority: template.priority as Priority,
         }));
       }
-    } else if (regForm.category === "EQUIPMENT_FAULT") {
+    } else if (isEquipmentRegistration) {
       if (regForm.priority !== "medium") {
         setRegForm((prev) => ({ ...prev, priority: "medium" }));
       }
@@ -4310,6 +4343,8 @@ function MainApp() {
     regForm.typeId,
     regForm.priority,
     currentAdminTemplate,
+    isEquipmentRegistration,
+    isFacilityRegistration,
   ]);
 
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -4641,17 +4676,11 @@ function MainApp() {
   };
 
   const handleRegister = () => {
-    const workflowForCreate =
-      workflowTypes.find((workflow) => workflow.id === regForm.workflowTypeId) ||
-      getWorkflowTypeByLegacyCategory(regForm.category);
-    const workflowTypeIdForCreate =
-      workflowForCreate?.id ||
-      regForm.workflowTypeId ||
-      (regForm.orderCategory ? "orders" : undefined);
-    const createModuleId =
-      workflowForCreate?.action === "order" || regForm.orderCategory
-        ? "orders"
-        : "darbai";
+    const workflowForCreate = selectedRegistrationWorkflow;
+    const workflowTypeIdForCreate = workflowForCreate?.id;
+    const createModuleId = getWorkflowCreateModuleId(workflowForCreate);
+    const compatibilityCategory =
+      getRegistrationCompatibilityCategory(workflowForCreate);
 
     if (
       !workflowTypeIdForCreate ||
@@ -4665,7 +4694,7 @@ function MainApp() {
       return;
     }
 
-    if (regForm.orderCategory) {
+    if (isOrderRegistration && regForm.orderCategory) {
       if (!regForm.clubId) {
         setRegValidationErrors({ clubId: "Pasirinkite sporto klubą" });
         return;
@@ -4795,6 +4824,7 @@ function MainApp() {
               status: "NAUJAS" as any,
               type: "ORDER",
               category: regForm.orderCategory as string,
+              workflowTypeId: workflowTypeIdForCreate,
               entityType: "fault",
               createdAt: Date.now(),
               updatedAt: Date.now(),
@@ -4899,6 +4929,7 @@ function MainApp() {
           status: "NAUJAS" as any,
           type: "ORDER",
           category: "PRINT",
+          workflowTypeId: workflowTypeIdForCreate,
           entityType: "fault",
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -4956,6 +4987,7 @@ function MainApp() {
           status: "NAUJAS" as any,
           type: "ORDER",
           category: "OTHER",
+          workflowTypeId: workflowTypeIdForCreate,
           entityType: "fault",
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -4993,9 +5025,9 @@ function MainApp() {
       errors.clubId = "Pasirinkite sporto klubą";
     }
 
-    if (regForm.category === "FACILITY_FAULT") {
+    if (isFacilityRegistration) {
       if (!regForm.equipmentId) errors.equipmentId = "Pasirinkite objektą";
-    } else if (regForm.category === "EQUIPMENT_FAULT") {
+    } else if (isEquipmentRegistration) {
       if (!regForm.equipmentId) {
         errors.equipmentId = "Pasirinkite objektą";
       } else if (
@@ -5006,7 +5038,7 @@ function MainApp() {
       }
     }
 
-    if (!regForm.typeId) {
+    if (isAssetRegistration && !regForm.typeId) {
       errors.typeId = "Pasirinkite gedimo tipą";
     }
 
@@ -5014,22 +5046,11 @@ function MainApp() {
       errors.title = "Įveskite darbo aprašymą";
     }
 
-    const warningWorkflowForCreate =
-      workflowTypes.find((workflow) => workflow.id === regForm.workflowTypeId) ||
-      getWorkflowTypeByLegacyCategory(regForm.category);
-    const warningWorkflowTypeIdForCreate =
-      warningWorkflowForCreate?.id ||
-      regForm.workflowTypeId ||
-      (regForm.orderCategory ? "orders" : undefined);
-    const warningCreateModuleId =
-      warningWorkflowForCreate?.action === "order" || regForm.orderCategory
-        ? "orders"
-        : "darbai";
-    const canBypassCoordinatorWarning = warningWorkflowTypeIdForCreate
+    const canBypassCoordinatorWarning = workflowTypeIdForCreate
       ? canCreateWorkflowCardResolver(
           currentUser,
-          warningWorkflowTypeIdForCreate,
-          warningCreateModuleId,
+          workflowTypeIdForCreate,
+          createModuleId,
         )
       : false;
 
@@ -5046,15 +5067,25 @@ function MainApp() {
     setRegValidationErrors({});
 
     const manualEquipmentId =
-      regForm.category === "EQUIPMENT_FAULT" && regForm.equipmentId !== "other"
+      isEquipmentRegistration && regForm.equipmentId !== "other"
         ? regForm.equipmentId
         : undefined;
     const existingEquipmentFault = findActiveEquipmentFault(
       faults,
       manualEquipmentId,
     );
+    const manualFacilityAssetObjectId =
+      isFacilityRegistration && regForm.equipmentId
+        ? getFacilityAssetObjectIdFromLegacy(regForm.equipmentId)
+        : undefined;
+    const existingFacilityFault = findActiveFacilityFault(
+      faults,
+      manualFacilityAssetObjectId,
+      workflowTypeIdForCreate,
+    );
+    const existingActiveFault = existingEquipmentFault || existingFacilityFault;
 
-    if (existingEquipmentFault) {
+    if (existingActiveFault) {
       const now = Date.now();
       const systemComment: FaultComment = {
         id: generateUniqueId("c"),
@@ -5070,9 +5101,9 @@ function MainApp() {
         source: "USER",
       };
       const updatedExistingFault: Fault = {
-        ...existingEquipmentFault,
-        comments: [...(existingEquipmentFault.comments || []), systemComment],
-        repeat_count: (existingEquipmentFault.repeat_count || 0) + 1,
+        ...existingActiveFault,
+        comments: [...(existingActiveFault.comments || []), systemComment],
+        repeat_count: (existingActiveFault.repeat_count || 0) + 1,
         updatedAt: now,
         updated_at: new Date(now).toISOString(),
         updatedBy: currentUser.name,
@@ -5095,7 +5126,7 @@ function MainApp() {
       logAudit(
         updatedExistingFault.id,
         "COMMENT_ADDED",
-        "Additional manual equipment report added to existing fault",
+        "Additional manual asset report added to existing fault",
       );
       setSelectedFault(updatedExistingFault);
       setIsDetailPanelOpen(true);
@@ -5107,7 +5138,7 @@ function MainApp() {
       return;
     }
 
-    const isOther = regForm.typeId === "other";
+    const isOther = isGenericRegistration || regForm.typeId === "other";
 
     const firstImage = regForm.attachments.find((a) => a.type === "image");
     const club = CLUBS.find((c) => c.id === regForm.clubId);
@@ -5125,9 +5156,9 @@ function MainApp() {
 
       finalPriority = regForm.priority;
     } else {
-      if (regForm.category === "FACILITY_FAULT") {
+      if (isFacilityRegistration) {
         let objectName = "Nenurodyta patalpa";
-        const template = facilityTemplates.find(
+        const template = facilityRegistrationObjects.find(
           (t) => t.id === regForm.equipmentId,
         );
         if (template) objectName = template.name;
@@ -5149,7 +5180,7 @@ function MainApp() {
             finalPriority = "medium";
           }
         }
-      } else if (regForm.category === "EQUIPMENT_FAULT") {
+      } else if (isEquipmentRegistration) {
         let eqName = "Nenurodytas treniruoklis";
         if (regForm.equipmentId === "other") {
           eqName = regForm.customEquipmentName || "Kitas treniruoklis";
@@ -5186,8 +5217,8 @@ function MainApp() {
       ? "EXISTS"
       : "MISSING";
 
-    if (regForm.category === "FACILITY_FAULT") {
-      const template = facilityTemplates.find(
+    if (isFacilityRegistration) {
+      const template = facilityRegistrationObjects.find(
         (t) => t.id === regForm.equipmentId,
       );
       if (template?.sop_url) {
@@ -5197,6 +5228,9 @@ function MainApp() {
     }
 
     const defaultAssignee = getDefaultAssigneeForClub(regForm.clubId);
+    const selectedFacilityObject = isFacilityRegistration
+      ? facilityRegistrationObjects.find((t) => t.id === regForm.equipmentId)
+      : undefined;
 
     const newFault: Fault = {
       id: generateUniqueId("f"),
@@ -5236,10 +5270,10 @@ function MainApp() {
       rejected: false,
       rejectReason: "",
       updatedBy: currentUser.name,
-      type: regForm.category || "OTHER",
+      type: compatibilityCategory,
       priority: finalPriority,
       coverImage:
-        regForm.category === "FACILITY_FAULT"
+        isFacilityRegistration
           ? firstImage
             ? firstImage.url
             : ""
@@ -5247,28 +5281,27 @@ function MainApp() {
       history: [],
       sopUrl: finalSopUrl,
       sopStatus: finalSopStatus,
-      category: regForm.category,
-      workflowTypeId:
-        regForm.workflowTypeId ||
-        getWorkflowTypeByLegacyCategory(regForm.category)?.id,
+      category: compatibilityCategory,
+      workflowTypeId: workflowTypeIdForCreate,
       region: club?.city,
       typeId: regForm.typeId, // Legacy mapping
       ...getEquipmentIdentityFields(
-        regForm.category === "EQUIPMENT_FAULT" &&
+        isEquipmentRegistration &&
           regForm.equipmentId !== "other"
           ? regForm.equipmentId
           : undefined,
       ),
       customEquipmentName:
-        regForm.category === "EQUIPMENT_FAULT" &&
+        isEquipmentRegistration &&
         regForm.equipmentId === "other"
           ? regForm.customEquipmentName
           : undefined,
-      template_id:
-        regForm.category === "FACILITY_FAULT" ? regForm.equipmentId : undefined,
+      ...getFacilityIdentityFields(
+        isFacilityRegistration ? regForm.equipmentId : undefined,
+        { isLocation: Boolean(selectedFacilityObject?.locationId) },
+      ),
       issue_type_id:
-        regForm.category === "EQUIPMENT_FAULT" ||
-        regForm.category === "FACILITY_FAULT"
+        isEquipmentRegistration || isFacilityRegistration
           ? regForm.typeId
           : undefined,
     } as Fault & {
@@ -5955,7 +5988,7 @@ ${task.updatedBy}
         canCreateWorkflowCardResolver(
           currentUser,
           workflow.id,
-          workflow.action === "order" ? "orders" : "darbai",
+          getWorkflowCreateModuleId(workflow),
         ),
       ),
     [currentUser, visibleWorkflowTypes],
@@ -6217,6 +6250,7 @@ ${task.updatedBy}
             allTasks={faults}
             currentUser={{ name: currentUser.name, id: "currentUser" }}
             onUpdateTasks={(updated) => setFaults(updated)}
+            workflowTypes={workflowTypes}
           />
         )}
 
@@ -6491,8 +6525,6 @@ ${task.updatedBy}
               setFacilityTemplates={setAppFacilityTemplates}
               equipmentList={adminDB.equipment}
               setEquipmentList={setAppEquipmentList}
-              equipmentIssueTypes={adminDB.issueTypes}
-              setEquipmentIssueTypes={setAppEquipmentIssueTypes}
               periodicTemplates={appPeriodicTemplates}
               setPeriodicTemplates={setAppPeriodicTemplates}
               clubTaskConfigs={clubTaskConfigs}
@@ -6946,8 +6978,6 @@ ${task.updatedBy}
                           setFacilityTemplates={setAppFacilityTemplates}
                           equipmentList={adminDB.equipment}
                           setEquipmentList={setAppEquipmentList}
-                          equipmentIssueTypes={adminDB.issueTypes}
-                          setEquipmentIssueTypes={setAppEquipmentIssueTypes}
                           periodicTemplates={appPeriodicTemplates}
                           setPeriodicTemplates={setAppPeriodicTemplates}
                           clubTaskConfigs={clubTaskConfigs}
@@ -7412,21 +7442,16 @@ ${task.updatedBy}
             onClose={() => setActiveModal(null)}
             workflows={creatableVisibleWorkflowTypes}
             currentUser={currentUser}
-            onSelectAction={(action, subType, workflowTypeId) => {
-              const workflow =
-                creatableVisibleWorkflowTypes.find(
-                  (visibleWorkflow) => visibleWorkflow.id === workflowTypeId,
-                ) ||
-                creatableVisibleWorkflowTypes.find(
-                  (visibleWorkflow) =>
-                    visibleWorkflow.legacyCategory === subType,
-                );
+            onSelectAction={(workflowTypeId) => {
+              const workflow = creatableVisibleWorkflowTypes.find(
+                (visibleWorkflow) => visibleWorkflow.id === workflowTypeId,
+              );
               if (!workflow) return;
               if (
                 !canCreateWorkflowCardResolver(
                   currentUser,
                   workflow.id,
-                  workflow.action === "order" ? "orders" : "darbai",
+                  getWorkflowCreateModuleId(workflow),
                 )
               ) {
                 return;
@@ -7435,30 +7460,19 @@ ${task.updatedBy}
               resetRegForm();
               setRegForm((prev) => ({
                 ...prev,
-                category: subType || undefined,
-                workflowTypeId: workflow?.id,
-                typeId: action === "other" ? "other" : prev.typeId,
+                category: getRegistrationCompatibilityCategory(workflow),
+                workflowTypeId: workflow.id,
+                typeId: workflow.objectType === "GENERIC" ? "other" : prev.typeId,
               }));
 
-              if (action === "fault") {
-                const cat = subType || "FACILITY_FAULT";
-                setRegType(
-                  cat === "EQUIPMENT_FAULT"
-                    ? "Treniruoklių darbai"
-                    : "Patalpų darbai",
-                );
+              if (workflow.objectType !== "ORDER") {
+                setRegType(workflow.name);
                 setRegStep(2);
-                setActiveModal("fault");
-              } else if (action === "other") {
-                setRegType("Kita");
-                setRegStep(2);
-                setActiveModal("fault");
-              } else if (action === "order") {
-                setRegType("Užsakymas");
-                setRegStep(3); // New step for order category selection
                 setActiveModal("fault");
               } else {
-                setActiveModal(action);
+                setRegType("Užsakymas");
+                setRegStep(3);
+                setActiveModal("fault");
               }
             }}
           />
@@ -7497,9 +7511,7 @@ ${task.updatedBy}
                       </button>
                     )}
                     <h3 className="text-lg font-bold">
-                      {regForm.category === "ORDER" ||
-                      regForm.orderCategory ||
-                      regStep === 3
+                      {isOrderRegistration || regForm.orderCategory || regStep === 3
                         ? regForm.orderCategory
                           ? `Užsakymai: ${regType}`
                           : "Užsakymai"
@@ -8469,8 +8481,7 @@ ${task.updatedBy}
                       <div
                         className={cn(
                           "grid gap-4",
-                          regForm.category === "EQUIPMENT_FAULT" ||
-                            regForm.category === "FACILITY_FAULT"
+                          isAssetRegistration
                             ? "grid-cols-3"
                             : "grid-cols-2",
                         )}
@@ -8524,12 +8535,11 @@ ${task.updatedBy}
                           )}
                         </div>
 
-                        {(regForm.category === "EQUIPMENT_FAULT" ||
-                          regForm.category === "FACILITY_FAULT") && (
+                        {isAssetRegistration && (
                           <>
                             <div className="space-y-1.5 relative">
                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                {regForm.category === "EQUIPMENT_FAULT"
+                                {isEquipmentRegistration
                                   ? "Treniruoklis"
                                   : "Gedimas"}
                               </label>
@@ -8617,8 +8627,7 @@ ${task.updatedBy}
                                           </div>
                                         </div>
                                         <div className="overflow-y-auto py-1">
-                                          {regForm.category ===
-                                            "EQUIPMENT_FAULT" &&
+                                          {isEquipmentRegistration &&
                                           equipmentSearchQuery &&
                                           !displayedEquipmentOptions.some(
                                             (e) => e.id !== "other",
@@ -8735,8 +8744,7 @@ ${task.updatedBy}
 
                         <div className="space-y-1.5 relative">
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            {regForm.category === "EQUIPMENT_FAULT" ||
-                            regForm.category === "FACILITY_FAULT"
+                            {isAssetRegistration
                               ? "Gedimo tipas"
                               : "Darbas"}
                           </label>
@@ -8875,7 +8883,7 @@ ${task.updatedBy}
                                   ? regForm.priority
                                   : currentAdminTemplate
                                     ? (currentAdminTemplate.priority as Priority)
-                                    : regForm.category === "EQUIPMENT_FAULT"
+                                    : isEquipmentRegistration
                                       ? "medium"
                                       : getFaultMeta(regForm.typeId)
                                           ?.priority || "medium"
@@ -9126,7 +9134,7 @@ ${task.updatedBy}
                       onClick={handleRegister}
                       className="flex-1 py-2.5 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 transition-all shadow-lg"
                     >
-                      {regForm.category === "ORDER" || regForm.orderCategory
+                      {isOrderRegistration || regForm.orderCategory
                         ? "Užsakyti"
                         : "Registruoti"}
                     </button>
@@ -9279,14 +9287,17 @@ ${task.updatedBy}
             }
           }}
           onRegisterFault={(clubId, equipmentId) => {
-            const equipmentWorkflow =
-              getWorkflowTypeByLegacyCategory("EQUIPMENT_FAULT");
+            const equipmentWorkflow = workflowTypes.find(
+              (workflow) =>
+                workflow.objectType === "EQUIPMENT" &&
+                Boolean(workflow.active ?? workflow.enabled),
+            );
             if (
               !equipmentWorkflow ||
               !canCreateWorkflowCardResolver(
                 currentUser,
                 equipmentWorkflow.id,
-                "darbai",
+                getWorkflowCreateModuleId(equipmentWorkflow),
               )
             ) {
               resetRegForm();
@@ -9296,7 +9307,8 @@ ${task.updatedBy}
 
             setRegForm((prev) => ({
               ...prev,
-              category: "EQUIPMENT_FAULT",
+              category: getRegistrationCompatibilityCategory(equipmentWorkflow),
+              workflowTypeId: equipmentWorkflow.id,
               clubId,
               equipmentId,
               typeId:
@@ -9308,7 +9320,7 @@ ${task.updatedBy}
                   ? (equipmentIssueTypesList[0].priority as any)
                   : "medium",
             }));
-            setRegType("Treniruoklių darbai");
+            setRegType(equipmentWorkflow.name);
             setActiveModal("fault");
           }}
         />

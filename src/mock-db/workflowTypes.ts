@@ -10,8 +10,11 @@ import {
 } from "lucide-react";
 import type { Priority } from "../types/faults";
 import { getDefaultWorkflowStatuses } from "../logic/workflowStatusRegistry";
+import { assetTypes } from "./assetTypes";
 
 export type WorkflowCategory = "DARBAI" | "KONTROLE" | "UZSAKYMAI" | "IDEJOS";
+export type WorkflowObjectType = "EQUIPMENT" | "FACILITY" | "ORDER" | "GENERIC";
+export type WorkflowQrMode = "OFF" | "GENERIC" | "ASSET_BASED";
 
 export interface WorkflowStatusConfig {
   id: string;
@@ -49,6 +52,11 @@ export interface WorkflowType {
   bg: string;
   hover: string;
   enabled: boolean;
+  objectType: WorkflowObjectType;
+  assetTypeId: string;
+  qrMode: WorkflowQrMode;
+  usesScope: boolean;
+  ownerUserId: string | null;
   category: WorkflowCategory;
   statuses: WorkflowStatusConfig[];
   priorities: WorkflowPriorityConfig[];
@@ -102,8 +110,28 @@ const defaultPriorities: WorkflowPriorityConfig[] = [
   { id: "critical", label: "Kritinis", slaHours: 6 },
 ];
 
+const assetTypeIds = {
+  equipment:
+    assetTypes.find((assetType) => assetType.code === "EQUIPMENT")?.id ||
+    "asset-type-equipment",
+  facility:
+    assetTypes.find((assetType) => assetType.code === "FACILITY")?.id ||
+    "asset-type-facility",
+  orders:
+    assetTypes.find((assetType) => assetType.code === "ORDERS")?.id ||
+    "asset-type-orders",
+  generic:
+    assetTypes.find((assetType) => assetType.code === "GENERIC")?.id ||
+    "asset-type-generic",
+};
+
 const baseWorkflow = {
   statuses: defaultStatuses,
+  objectType: "GENERIC" as const,
+  assetTypeId: assetTypeIds.generic,
+  qrMode: "OFF" as const,
+  usesScope: false,
+  ownerUserId: null,
   priorities: defaultPriorities,
   slaRules: { defaultHours: 48, criticalHours: 6, warningRatio: 0.8 },
   assignmentRules: { strategy: "role" as const, defaultRole: "OPS" },
@@ -148,6 +176,11 @@ export const workflowTypes: WorkflowType[] = [
     bg: "bg-red-50",
     hover: "hover:border-red-200",
     enabled: true,
+    objectType: "FACILITY",
+    assetTypeId: assetTypeIds.facility,
+    qrMode: "ASSET_BASED",
+    usesScope: true,
+    ownerUserId: null,
     category: "DARBAI",
     requiredFields: [
       { id: "clubId", label: "Sporto klubas", type: "club", required: true },
@@ -173,6 +206,11 @@ export const workflowTypes: WorkflowType[] = [
     bg: "bg-orange-50",
     hover: "hover:border-orange-200",
     enabled: true,
+    objectType: "EQUIPMENT",
+    assetTypeId: assetTypeIds.equipment,
+    qrMode: "ASSET_BASED",
+    usesScope: true,
+    ownerUserId: null,
     category: "DARBAI",
     requiredFields: [
       { id: "clubId", label: "Sporto klubas", type: "club", required: true },
@@ -289,6 +327,11 @@ export const workflowTypes: WorkflowType[] = [
     bg: "bg-brand-lime",
     hover: "hover:border-black",
     enabled: true,
+    objectType: "ORDER",
+    assetTypeId: assetTypeIds.orders,
+    qrMode: "OFF",
+    usesScope: true,
+    ownerUserId: null,
     category: "UZSAKYMAI",
     assignmentRules: { strategy: "supplier", defaultRole: "OPS" },
     requiredFields: [

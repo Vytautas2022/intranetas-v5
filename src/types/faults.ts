@@ -60,6 +60,7 @@ export interface Fault extends MockFault {
   assigned_by?: string;
   assigned_at?: number;
   public_url?: string;
+  assetObjectId?: string;
   
   // New fields for periodic refactor
   source?: "USER" | "QR" | "PERIODIC";

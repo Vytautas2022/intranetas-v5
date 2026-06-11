@@ -12,11 +12,7 @@ import {
 interface HomeActionModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectAction: (
-    action: "fault" | "order" | "other",
-    subType?: string,
-    workflowTypeId?: string,
-  ) => void;
+  onSelectAction: (workflowTypeId: string) => void;
   workflows: WorkflowType[];
   currentUser?: AuthUser;
 }
@@ -44,7 +40,7 @@ export const HomeActionModal: React.FC<HomeActionModalProps> = ({
           canCreateWorkflowCardResolver(
             currentUser,
             workflow.id,
-            workflow.action === "order" ? "orders" : "darbai",
+            workflow.objectType === "ORDER" ? "orders" : "darbai",
           ),
       )
     : workflows;
@@ -112,13 +108,7 @@ export const HomeActionModal: React.FC<HomeActionModalProps> = ({
                       return (
                         <button
                           key={`${workflow.id}-${workflow.name}`}
-                          onClick={() =>
-                            onSelectAction(
-                              workflow.action,
-                              workflow.legacyCategory,
-                              workflow.id,
-                            )
-                          }
+                          onClick={() => onSelectAction(workflow.id)}
                           className={cn(
                             "w-full p-4 rounded-2xl border border-slate-100 bg-white flex items-start gap-4 transition-all text-left",
                             "hover:shadow-lg hover:shadow-slate-100",

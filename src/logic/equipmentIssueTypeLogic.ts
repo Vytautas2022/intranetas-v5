@@ -1,7 +1,8 @@
+import type { EquipmentIssueType } from "../mock-db/admin";
 import {
-  equipmentIssueTypesList,
-  type EquipmentIssueType,
-} from "../mock-db/admin";
+  getLegacyEquipmentIssueTypes,
+  getLegacyFacilityIssueTypes,
+} from "../mock-db/assetIssueTypes";
 
 type ConfiguredEquipmentIssueType = EquipmentIssueType & {
   is_default?: boolean;
@@ -27,8 +28,15 @@ const isActiveEquipmentIssueType = (issueType: ConfiguredEquipmentIssueType) =>
 const isDefaultEquipmentIssueType = (issueType: ConfiguredEquipmentIssueType) =>
   issueType.is_default === true || issueType.isDefault === true;
 
+const isActiveFacilityIssueType = (issueType: ConfiguredEquipmentIssueType) =>
+  issueType.is_active !== false &&
+  issueType.active !== false &&
+  (issueType.applies_to === "FACILITY" ||
+    issueType.applies_to === "BOTH" ||
+    !issueType.applies_to);
+
 export const getDefaultEquipmentIssueTypeForQr = (
-  issueTypes: ConfiguredEquipmentIssueType[] = equipmentIssueTypesList,
+  issueTypes: ConfiguredEquipmentIssueType[] = getLegacyEquipmentIssueTypes(),
 ): EquipmentIssueType | null => {
   const activeIssueTypes = issueTypes.filter(isActiveEquipmentIssueType);
   const defaultIssueTypes = activeIssueTypes.filter(isDefaultEquipmentIssueType);
@@ -36,6 +44,27 @@ export const getDefaultEquipmentIssueTypeForQr = (
   if (defaultIssueTypes.length > 1) {
     console.warn(
       "[equipment-issues] Multiple default equipment issue types configured for QR; using the first default.",
+    );
+  }
+
+  if (defaultIssueTypes.length > 0) return defaultIssueTypes[0];
+
+  return (
+    [...activeIssueTypes].sort(
+      (a, b) => priorityRank[b.priority] - priorityRank[a.priority],
+    )[0] || null
+  );
+};
+
+export const getDefaultFacilityIssueTypeForQr = (
+  issueTypes: ConfiguredEquipmentIssueType[] = getLegacyFacilityIssueTypes(),
+): EquipmentIssueType | null => {
+  const activeIssueTypes = issueTypes.filter(isActiveFacilityIssueType);
+  const defaultIssueTypes = activeIssueTypes.filter(isDefaultEquipmentIssueType);
+
+  if (defaultIssueTypes.length > 1) {
+    console.warn(
+      "[facility-issues] Multiple default facility issue types configured for QR; using the first default.",
     );
   }
 
