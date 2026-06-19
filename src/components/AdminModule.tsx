@@ -65,7 +65,11 @@ import {
   workflowTypes as initialWorkflowTypes,
   WorkflowType,
 } from "../mock-db/workflowTypes";
-import { assetTypes as initialAssetTypes, type AssetType } from "../mock-db/assetTypes";
+import {
+  assetTypes as initialAssetTypes,
+  type AssetType,
+  type AssetTypeMode,
+} from "../mock-db/assetTypes";
 import {
   assetObjects as initialAssetObjects,
   type AssetObject,
@@ -151,14 +155,14 @@ const adminNavigationItems: AdminNavigationItem[] = [
   { id: "users", label: "Vartotojai", group: "Organization", icon: Users, visibility: "visible" },
   { id: "roles_permissions", label: "Roles & Permissions", group: "Organization", icon: ShieldCheck, visibility: "visible" },
   { id: "workflow_types", label: "Workflow Types", group: "Workflow System", icon: Workflow, visibility: "visible" },
-  { id: "asset_types", label: "Asset Types", group: "Assets / Objects", icon: Package, visibility: "visible" },
-  { id: "asset_objects", label: "Turto objektai", group: "Assets / Objects", icon: Building, visibility: "visible" },
-  { id: "asset_issue_types", label: "Asset Issue Types", group: "Assets / Objects", icon: Activity, visibility: "hidden" },
-  { id: "equipment", label: "Treniruokliai", group: "Assets / Objects", icon: Dumbbell, visibility: "visible" },
-  { id: "facility", label: "Patalpų darbai", group: "Assets / Objects", icon: Wrench, visibility: "visible" },
-  { id: "equipment_issues", label: "Gedimo tipas", group: "Assets / Objects", icon: Activity, visibility: "visible" },
-  { id: "inventory", label: "Užsakymai", group: "Assets / Objects", icon: Package, visibility: "visible" },
-  { id: "periodiniai", label: "Periodiniai darbai", group: "Automations", icon: RefreshCw, visibility: "visible" },
+  { id: "asset_types", label: "Turtas", group: "Assets / Objects", icon: Package, visibility: "hidden" },
+  { id: "asset_objects", label: "Turto vienetai", group: "Assets / Objects", icon: Building, visibility: "hidden" },
+  { id: "asset_issue_types", label: "Gedimų tipai", group: "Assets / Objects", icon: Activity, visibility: "hidden" },
+  { id: "equipment", label: "Treniruokliai", group: "Assets / Objects", icon: Dumbbell, visibility: "hidden" },
+  { id: "facility", label: "Patalpu darbai", group: "Assets / Objects", icon: Wrench, visibility: "hidden" },
+  { id: "equipment_issues", label: "Gedimo tipas", group: "Assets / Objects", icon: Activity, visibility: "hidden" },
+  { id: "inventory", label: "Užsakymai", group: "Assets / Objects", icon: Package, visibility: "hidden" },
+  { id: "periodiniai", label: "Periodiniai darbai", group: "Automations", icon: RefreshCw, visibility: "hidden" },
   { id: "audit", label: "Auditas", group: "Analytics & Monitoring", icon: FileText, visibility: "visible" },
   { id: "periodic_templates", label: "Periodiniai šablonai", group: "Legacy / Internal", icon: History, visibility: "hidden" },
 ];
@@ -218,7 +222,7 @@ function AdminActiveSwitch({
           )}
         />
       </span>
-      <span className="w-6 text-[10px]">{active ? "ON" : "OFF"}</span>
+      <span className="w-6 text-[10px]">{active ? "Taip" : "Ne"}</span>
     </button>
   );
 }
@@ -365,14 +369,90 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   const visibleAdminItemsForUser = visibleAdminNavigationItems.filter((item) =>
     canAccessAdminTabResolver(currentUser, item.id),
   );
+  const assetRootPath = getTabRoute("asset_types");
+  const isPeriodicRoute = path.includes(getTabRoute("periodiniai"));
+  const selectedAssetTypeIdFromPath = path.startsWith(`${assetRootPath}/`)
+    ? decodeURIComponent(path.slice(`${assetRootPath}/`.length).split("/")[0])
+    : "";
+  const activeAssetTypes = assetTypes
+    .filter((assetType) => assetType.active !== false)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const canAccessAssets = canAccessAdminTabResolver(currentUser, "asset_types");
 
   return (
-    <div className="p-0 md:p-6 min-h-full md:h-full bg-white md:bg-transparent">
-      <div className="h-full min-h-0 flex flex-col md:flex-row bg-white md:rounded-3xl md:border md:border-slate-200 md:shadow-sm overflow-hidden">
+    <div
+      className={cn(
+        "p-0 md:p-6 min-h-full bg-white md:bg-transparent",
+        isPeriodicRoute ? "h-auto" : "md:h-full",
+      )}
+    >
+      <div
+        className={cn(
+          "min-h-0 flex flex-col md:flex-row bg-white md:rounded-3xl md:border md:border-slate-200 md:shadow-sm",
+          isPeriodicRoute ? "h-auto overflow-visible" : "h-full overflow-hidden",
+        )}
+      >
         <aside className="md:w-72 md:shrink-0 border-b md:border-b-0 md:border-r border-slate-100 bg-slate-50/70">
           <div className="h-full overflow-x-auto md:overflow-x-visible md:overflow-y-auto p-3">
             <nav className="flex md:flex-col gap-4 md:gap-5 min-w-max md:min-w-0">
               {adminNavigationGroups.map((group) => {
+                if (group === "Assets / Objects") {
+                  if (!canAccessAssets) return null;
+
+                  return (
+                    <div key={group} className="space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => navigate(assetRootPath)}
+                        className={cn(
+                          "w-full px-2 text-left text-[9px] font-black uppercase tracking-[0.18em] whitespace-nowrap transition-colors",
+                          path === assetRootPath
+                            ? "text-slate-900"
+                            : "text-slate-400 hover:text-slate-700",
+                        )}
+                      >
+                        Turtas
+                      </button>
+                      <div className="flex md:flex-col gap-1">
+                        {activeAssetTypes.map((assetType) => {
+                          const active =
+                            selectedAssetTypeIdFromPath === assetType.id;
+                          return (
+                            <button
+                              key={assetType.id}
+                              onClick={() =>
+                                navigate(`${assetRootPath}/${assetType.id}`)
+                              }
+                              className={cn(
+                                "flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-semibold transition-colors whitespace-nowrap text-left",
+                                active
+                                  ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/70"
+                                  : "text-slate-500 hover:text-slate-800 hover:bg-white/70",
+                              )}
+                            >
+                              <Package
+                                size={15}
+                                className={
+                                  active ? "text-slate-900" : "text-slate-400"
+                                }
+                              />
+                              <span className="truncate">{assetType.name}</span>
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => navigate(assetRootPath)}
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-[12px] font-black transition-colors whitespace-nowrap text-left text-slate-400 hover:text-slate-800 hover:bg-white/70"
+                        >
+                          <Plus size={14} />
+                          <span className="truncate">Sukurti turto tipą</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
                 const groupItems = visibleAdminItemsForUser.filter(
                   (item) => item.group === group,
                 );
@@ -479,7 +559,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           />
         )}
         {path.includes(getTabRoute("periodiniai")) && renderPeriodicModule && (
-          <div className="h-full">{renderPeriodicModule()}</div>
+          <div className="h-auto overflow-visible">{renderPeriodicModule()}</div>
         )}
         {path.includes(getTabRoute("equipment")) && (
           <EquipmentAdmin
@@ -489,9 +569,20 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
           />
         )}
         {path.includes(getTabRoute("asset_types")) && (
-          <AssetTypesAdmin
+          <AssetTypesWorkspace
             assetTypes={assetTypes}
             setAssetTypes={setAssetTypes}
+            assetObjects={assetObjects}
+            setAssetObjects={setAssetObjects}
+            assetIssueTypes={assetIssueTypes}
+            setAssetIssueTypes={setAssetIssueTypes}
+            clubs={clubs}
+            workflows={workflowTypes}
+            cards={tasks}
+            selectedAssetTypeId={selectedAssetTypeIdFromPath}
+            onOpenAssetType={(assetTypeId) =>
+              navigate(`${assetRootPath}/${assetTypeId}`)
+            }
           />
         )}
         {path.includes(getTabRoute("asset_objects")) && (
@@ -621,6 +712,16 @@ function RolesPermissionsPlaceholder({
         )
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     [workflows],
+  );
+  const workflowAccessRows = useMemo(
+    () => [
+      ...activeWorkflows.map((workflow) => ({
+        id: workflow.id,
+        label: workflow.label || workflow.name,
+      })),
+      { id: "periodiniai", label: "Periodiniai darbai" },
+    ],
+    [activeWorkflows],
   );
   const modulePermissionKeys: Array<{
     key: ModulePermissionKey;
@@ -969,7 +1070,7 @@ function RolesPermissionsPlaceholder({
         ),
       );
       const missingAccess = roles.flatMap((role) =>
-        activeWorkflows
+        workflowAccessRows
           .filter(
             (workflow) => !existingKeys.has(`${role.id}::${workflow.id}`),
           )
@@ -989,7 +1090,7 @@ function RolesPermissionsPlaceholder({
         ? [...currentAccess, ...missingAccess]
         : currentAccess;
     });
-  }, [activeWorkflows, roles, setWorkflowAccess]);
+  }, [roles, setWorkflowAccess, workflowAccessRows]);
 
   const addRole = () => {
     const roleName = newRoleName.trim();
@@ -1018,7 +1119,7 @@ function RolesPermissionsPlaceholder({
     ]);
     setWorkflowAccess((currentAccess) => [
       ...currentAccess,
-      ...activeWorkflows.map((workflow) => ({
+      ...workflowAccessRows.map((workflow) => ({
         roleId,
         workflowTypeId: workflow.id,
         canView: false,
@@ -1155,7 +1256,7 @@ function RolesPermissionsPlaceholder({
 
               <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-3">
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                  Create role
+                  Sukurti rolę
                 </p>
                 <div className="mt-3 space-y-2">
                   <input
@@ -1178,7 +1279,7 @@ function RolesPermissionsPlaceholder({
                     className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
                     <Plus size={15} />
-                    Create role
+                    Sukurti rolę
                   </button>
                 </div>
               </div>
@@ -1217,7 +1318,7 @@ function RolesPermissionsPlaceholder({
                                 ? "System roles cannot be deleted"
                                 : assignmentCount > 0
                                   ? "Role cannot be deleted because it is assigned to users."
-                                  : "Delete role"
+                                  : "Ištrinti rolę"
                             }
                             className={cn(
                               "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
@@ -1227,7 +1328,7 @@ function RolesPermissionsPlaceholder({
                             )}
                           >
                             <Trash2 size={14} />
-                            Delete role
+                            Ištrinti rolę
                           </button>
                         </div>
                       );
@@ -1348,7 +1449,7 @@ function RolesPermissionsPlaceholder({
                       </p>
                     </div>
                     <div className="divide-y divide-slate-100">
-                      {activeWorkflows.map((workflow) => {
+                      {workflowAccessRows.map((workflow) => {
                         const access = getWorkflowAccess(
                           selectedRole.id,
                           workflow.id,
@@ -1359,7 +1460,7 @@ function RolesPermissionsPlaceholder({
                             className="grid gap-3 p-4 xl:grid-cols-[220px_1fr] xl:items-center"
                           >
                             <p className="text-sm font-semibold text-slate-900">
-                              {workflow.label || workflow.name}
+                              {workflow.label}
                             </p>
                             <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
                               {visibleWorkflowPermissionKeys.map((permission) => (
@@ -1515,7 +1616,7 @@ function RolesPermissionsPlaceholder({
                 </>
               ) : (
                 <section className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                  Create a role to manage permissions.
+                  Sukurkite rolę leidimams valdyti.
                 </section>
               )}
             </main>
@@ -1544,7 +1645,7 @@ function RolesPermissionsPlaceholder({
                     Workflow visibility enforced
                   </span>
                   <span className="inline-flex w-fit items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                    Create enforcement enabled
+                    Kūrimo kontrolė įjungta
                   </span>
                 </div>
               </div>
@@ -1640,7 +1741,7 @@ function RolesPermissionsPlaceholder({
                           <th className="px-4 py-3 font-semibold">Legacy</th>
                           <th className="px-4 py-3 font-semibold">Resolver</th>
                           <th className="px-4 py-3 font-semibold">Mode</th>
-                          <th className="px-4 py-3 font-semibold">Status</th>
+                          <th className="px-4 py-3 font-semibold">Būsena</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1731,7 +1832,7 @@ function RolesPermissionsPlaceholder({
                             Effective roles
                           </th>
                           <th className="px-4 py-3 font-semibold">Fallback</th>
-                          <th className="px-4 py-3 font-semibold">Status</th>
+                          <th className="px-4 py-3 font-semibold">Būsena</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1828,7 +1929,7 @@ function RolesPermissionsPlaceholder({
                           <th className="px-4 py-3 font-semibold">Legacy UI</th>
                           <th className="px-4 py-3 font-semibold">Resolver</th>
                           <th className="px-4 py-3 font-semibold">Mode</th>
-                          <th className="px-4 py-3 font-semibold">Status</th>
+                          <th className="px-4 py-3 font-semibold">Būsena</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1958,26 +2059,242 @@ function AdminModal({
   );
 }
 
-function AssetTypesAdmin({
+function AssetTypesWorkspace({
   assetTypes,
   setAssetTypes,
+  assetObjects,
+  setAssetObjects,
+  assetIssueTypes,
+  setAssetIssueTypes,
+  clubs,
+  workflows,
+  cards,
+  selectedAssetTypeId,
+  onOpenAssetType,
 }: {
   assetTypes: AssetType[];
   setAssetTypes: React.Dispatch<React.SetStateAction<AssetType[]>>;
+  assetObjects: AssetObject[];
+  setAssetObjects: React.Dispatch<React.SetStateAction<AssetObject[]>>;
+  assetIssueTypes: AssetIssueType[];
+  setAssetIssueTypes: React.Dispatch<React.SetStateAction<AssetIssueType[]>>;
+  clubs: Club[];
+  workflows: WorkflowType[];
+  cards: any[];
+  selectedAssetTypeId?: string;
+  onOpenAssetType: (assetTypeId: string) => void;
+}) {
+  const selectedAssetType = selectedAssetTypeId
+    ? assetTypes.find((assetType) => assetType.id === selectedAssetTypeId)
+    : null;
+  const [activeTab, setActiveTab] = useState<"objects" | "issues">("objects");
+
+  if (!selectedAssetType) {
+    return (
+      <AssetTypesAdmin
+        assetTypes={assetTypes}
+        setAssetTypes={setAssetTypes}
+        assetObjects={assetObjects}
+        assetIssueTypes={assetIssueTypes}
+        workflows={workflows}
+        cards={cards}
+        onOpenAssetType={onOpenAssetType}
+      />
+    );
+  }
+
+  const objectCount = assetObjects.filter(
+    (object) => object.assetTypeId === selectedAssetType.id,
+  ).length;
+  const issueCount = assetIssueTypes.filter(
+    (issueType) => issueType.assetTypeId === selectedAssetType.id,
+  ).length;
+
+  return (
+    <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible space-y-6">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-black text-slate-900">
+            {selectedAssetType.name}
+          </h2>
+          <p className="text-sm text-slate-500 font-medium">
+            Turto tipas valdo savo turto vienetus ir gedimų tipus.
+          </p>
+        </div>
+        <AdminActiveSwitch
+          active={selectedAssetType.active !== false}
+          onClick={() =>
+            setAssetTypes(
+              assetTypes.map((assetType) =>
+                assetType.id === selectedAssetType.id
+                  ? { ...assetType, active: !assetType.active }
+                  : assetType,
+              ),
+            )
+          }
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:max-w-md">
+        <button
+          type="button"
+          onClick={() => setActiveTab("objects")}
+          className={cn(
+            "rounded-xl border px-4 py-3 text-left transition-colors",
+            activeTab === "objects"
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+          )}
+        >
+          <span className="block text-sm font-black">Turto vienetai</span>
+          <span className="text-xs font-bold opacity-70">{objectCount}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("issues")}
+          className={cn(
+            "rounded-xl border px-4 py-3 text-left transition-colors",
+            activeTab === "issues"
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+          )}
+        >
+          <span className="block text-sm font-black">Gedimų tipai</span>
+          <span className="text-xs font-bold opacity-70">{issueCount}</span>
+        </button>
+      </div>
+
+      {activeTab === "objects" ? (
+        <AssetObjectsAdmin
+          assetTypes={assetTypes}
+          assetObjects={assetObjects}
+          setAssetObjects={setAssetObjects}
+          clubs={clubs}
+          lockedAssetTypeId={selectedAssetType.id}
+          heading="Turto vienetai"
+        />
+      ) : (
+        <AssetIssueTypesAdmin
+          assetTypes={assetTypes}
+          issueTypes={assetIssueTypes}
+          setIssueTypes={setAssetIssueTypes}
+          lockedAssetTypeId={selectedAssetType.id}
+          heading="Gedimų tipai"
+        />
+      )}
+    </div>
+  );
+}
+
+function AssetTypesAdmin({
+  assetTypes,
+  setAssetTypes,
+  assetObjects,
+  assetIssueTypes,
+  workflows,
+  cards,
+  onOpenAssetType,
+}: {
+  assetTypes: AssetType[];
+  setAssetTypes: React.Dispatch<React.SetStateAction<AssetType[]>>;
+  assetObjects: AssetObject[];
+  assetIssueTypes: AssetIssueType[];
+  workflows: WorkflowType[];
+  cards: any[];
+  onOpenAssetType?: (assetTypeId: string) => void;
 }) {
   const [editing, setEditing] = useState<AssetType | null>(null);
+  const getAssetTypeModeLabel = (mode?: AssetTypeMode) =>
+    mode === "ORDERS" ? "Užsakymų valdymas" : "Turto gedimų valdymas";
+  const getModeCapabilities = (mode: AssetTypeMode) =>
+    mode === "ORDERS"
+      ? {
+          usesQr: false,
+          usesSla: false,
+          usesPriority: false,
+          usesIssueTypes: false,
+          usesAssets: false,
+        }
+      : {
+          usesQr: true,
+          usesSla: true,
+          usesPriority: true,
+          usesIssueTypes: true,
+          usesAssets: true,
+        };
+  const getCardAssetTypeId = (card: any) => {
+    if (typeof card?.assetTypeId === "string") return card.assetTypeId;
+    if (typeof card?.workflowTypeId === "string") {
+      return (
+        workflows.find((workflow) => workflow.id === card.workflowTypeId)
+          ?.assetTypeId || null
+      );
+    }
+    if (typeof card?.assetObjectId === "string") {
+      return (
+        assetObjects.find((object) => object.id === card.assetObjectId)
+          ?.assetTypeId || null
+      );
+    }
+    return null;
+  };
+  const getAssetTypeDeleteState = (assetTypeId: string) => {
+    const hasWorkflowReferences = workflows.some(
+      (workflow) => workflow.assetTypeId === assetTypeId,
+    );
+    const hasAssetObjects = assetObjects.some(
+      (object) => object.assetTypeId === assetTypeId,
+    );
+    const hasIssueTypes = assetIssueTypes.some(
+      (issueType) => issueType.assetTypeId === assetTypeId,
+    );
+    const hasCardReferences = cards.some(
+      (card) => getCardAssetTypeId(card) === assetTypeId,
+    );
+
+    return {
+      canDelete:
+        !hasWorkflowReferences &&
+        !hasAssetObjects &&
+        !hasIssueTypes &&
+        !hasCardReferences,
+      hasWorkflowReferences,
+      hasAssetObjects,
+      hasIssueTypes,
+      hasCardReferences,
+    };
+  };
+  const getAssetTypeCode = (name: string) =>
+    name
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_|_$/g, "") || "ASSET";
+  const getAssetTypeId = (name: string) =>
+    `asset-type-${name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || Date.now()}`;
 
   const saveAssetType = () => {
     if (!editing) return;
 
     const exists = assetTypes.some((assetType) => assetType.id === editing.id);
+    const name = editing.name.trim();
+    if (!name || !editing.mode) return;
+    const mode = editing.mode;
     const nextAssetType: AssetType = {
       ...editing,
-      id:
-        editing.id ||
-        `asset-type-${editing.code.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-      code: editing.code.trim().toUpperCase(),
-      name: editing.name.trim() || editing.code.trim(),
+      id: editing.id || getAssetTypeId(name),
+      code:
+        editing.code && editing.code !== "NEW"
+          ? editing.code.trim().toUpperCase()
+          : getAssetTypeCode(name),
+      name,
+      description: editing.description?.trim() || undefined,
+      mode,
+      ...getModeCapabilities(mode),
     };
 
     setAssetTypes(
@@ -1988,29 +2305,37 @@ function AssetTypesAdmin({
         : [...assetTypes, nextAssetType],
     );
     setEditing(null);
+    if (!exists) {
+      onOpenAssetType?.(nextAssetType.id);
+    }
   };
 
   const createAssetType = () => {
+    const mode: AssetTypeMode = "ASSET_FAULTS";
     setEditing({
       id: `asset-type-${Date.now()}`,
       code: "NEW",
-      name: "Naujas turto tipas",
+      name: "",
+      description: "",
+      mode,
       active: true,
-      usesQr: false,
-      usesSla: false,
-      usesPriority: false,
-      usesIssueTypes: false,
-      usesAssets: false,
+      ...getModeCapabilities(mode),
     });
+  };
+  const deleteAssetType = (assetType: AssetType) => {
+    const deleteState = getAssetTypeDeleteState(assetType.id);
+    if (!deleteState.canDelete) return;
+    if (!window.confirm("Ištrinti turto tipą?")) return;
+    setAssetTypes(assetTypes.filter((item) => item.id !== assetType.id));
   };
 
   return (
     <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-xl font-bold">Asset Types</h2>
+          <h2 className="text-xl font-bold">Turtas</h2>
           <p className="text-sm text-slate-500 font-medium">
-            Turto tipų foundation sluoksnis Workflow Types konfiguracijai.
+            Sukurkite turto tipą, tada valdykite jo turto vienetus ir gedimų tipus.
           </p>
         </div>
         <button
@@ -2026,45 +2351,71 @@ function AssetTypesAdmin({
           <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
             <tr>
               <th className="px-4 py-3 text-left">Pavadinimas</th>
-              <th className="px-4 py-3 text-left">Kodas</th>
+              <th className="px-4 py-3 text-left">Veikimo logika</th>
               <th className="px-4 py-3 text-left">Statusas</th>
               <th className="px-4 py-3 text-right">Veiksmai</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {assetTypes.map((assetType) => (
-              <tr key={assetType.id} className="hover:bg-slate-50/70">
-                <td className="px-4 py-3 font-bold text-slate-900">
-                  {assetType.name}
-                </td>
-                <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                  {assetType.code}
-                </td>
-                <td className="px-4 py-3">
-                  <AdminActiveSwitch
-                    active={assetType.active}
-                    onClick={() =>
-                      setAssetTypes(
-                        assetTypes.map((item) =>
-                          item.id === assetType.id
-                            ? { ...item, active: !item.active }
-                            : item,
-                        ),
-                      )
-                    }
-                  />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => setEditing(assetType)}
-                    className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-slate-100"
-                    title="Redaguoti"
-                  >
-                    <Edit2 size={16} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {assetTypes.map((assetType) => {
+              const deleteState = getAssetTypeDeleteState(assetType.id);
+              return (
+                <tr key={assetType.id} className="hover:bg-slate-50/70">
+                  <td className="px-4 py-3 font-bold text-slate-900">
+                    <button
+                      type="button"
+                      onClick={() => onOpenAssetType?.(assetType.id)}
+                      className="font-bold text-slate-900 hover:underline"
+                    >
+                      {assetType.name}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-slate-500 font-medium">
+                    {getAssetTypeModeLabel(assetType.mode)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <AdminActiveSwitch
+                      active={assetType.active}
+                      onClick={() =>
+                        setAssetTypes(
+                          assetTypes.map((item) =>
+                            item.id === assetType.id
+                              ? { ...item, active: !item.active }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => setEditing(assetType)}
+                      className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+                      title="Redaguoti"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => deleteAssetType(assetType)}
+                      disabled={!deleteState.canDelete}
+                      className={cn(
+                        "inline-flex items-center justify-center p-2 rounded-lg",
+                        deleteState.canDelete
+                          ? "text-slate-500 hover:bg-red-50 hover:text-red-600"
+                          : "text-slate-300 cursor-not-allowed",
+                      )}
+                      title={
+                        deleteState.canDelete
+                          ? "Ištrinti"
+                          : "Turto tipas naudojamas sistemoje"
+                      }
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -2085,22 +2436,64 @@ function AssetTypesAdmin({
                 onChange={(event) =>
                   setEditing({ ...editing, name: event.target.value })
                 }
+                required
                 className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
               />
             </label>
 
-            <label className="block space-y-1">
+            <div className="space-y-2">
               <span className="text-[11px] font-black uppercase text-slate-400">
-                Kodas
+                Veikimo logika
               </span>
-              <input
-                value={editing.code}
-                onChange={(event) =>
-                  setEditing({ ...editing, code: event.target.value })
-                }
-                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
-              />
-            </label>
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                <input
+                  type="radio"
+                  name="asset-type-mode"
+                  value="ASSET_FAULTS"
+                  checked={editing.mode === "ASSET_FAULTS"}
+                  onChange={() =>
+                    setEditing({
+                      ...editing,
+                      mode: "ASSET_FAULTS",
+                      ...getModeCapabilities("ASSET_FAULTS"),
+                    })
+                  }
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-900">
+                    Turto gedimų valdymas
+                  </span>
+                  <span className="block text-xs font-semibold text-slate-500">
+                    Turto vienetai, gedimų tipai, SLA, prioritetas, QR, sporto klubas ir statusas.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+                <input
+                  type="radio"
+                  name="asset-type-mode"
+                  value="ORDERS"
+                  checked={editing.mode === "ORDERS"}
+                  onChange={() =>
+                    setEditing({
+                      ...editing,
+                      mode: "ORDERS",
+                      ...getModeCapabilities("ORDERS"),
+                    })
+                  }
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-900">
+                    Užsakymų valdymas
+                  </span>
+                  <span className="block text-xs font-semibold text-slate-500">
+                    SKU, minimalus kiekis, tiekėjas, sporto klubas ir statusas.
+                  </span>
+                </span>
+              </label>
+            </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -2111,6 +2504,7 @@ function AssetTypesAdmin({
               </button>
               <button
                 onClick={saveAssetType}
+                disabled={!editing.name.trim() || !editing.mode}
                 className="px-4 py-2 rounded-xl bg-black text-white text-sm font-bold"
               >
                 Išsaugoti
@@ -2128,24 +2522,38 @@ function AssetObjectsAdmin({
   assetObjects,
   setAssetObjects,
   clubs,
+  lockedAssetTypeId,
+  heading = "Turto vienetai",
 }: {
   assetTypes: AssetType[];
   assetObjects: AssetObject[];
   setAssetObjects: React.Dispatch<React.SetStateAction<AssetObject[]>>;
   clubs: Club[];
+  lockedAssetTypeId?: string;
+  heading?: string;
 }) {
   const [editing, setEditing] = useState<AssetObject | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const defaultAssetTypeId =
+    lockedAssetTypeId ||
     assetTypes.find((assetType) => assetType.usesAssets)?.id ||
     assetTypes[0]?.id ||
     "asset-type-equipment";
   const getAssetTypeLabel = (assetTypeId: string) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
     assetTypeId;
+  const getPriorityLabel = (priority: AssetIssueType["priority"]) => {
+    if (priority === "low") return "Žemas";
+    if (priority === "high") return "Aukštas";
+    if (priority === "critical") return "Kritinis";
+    return "Vidutinis";
+  };
   const getClubLabel = (clubId?: string) =>
     clubId ? clubs.find((club) => club.id === clubId)?.name || clubId : "-";
   const filteredObjects = assetObjects.filter((object) => {
+    if (lockedAssetTypeId && object.assetTypeId !== lockedAssetTypeId) {
+      return false;
+    }
     const query = searchQuery.trim().toLowerCase();
     if (!query) return true;
     return (
@@ -2186,7 +2594,7 @@ function AssetObjectsAdmin({
       id: `asset-object-${Date.now()}`,
       assetTypeId: defaultAssetTypeId,
       code: "NEW",
-      name: "Naujas turto objektas",
+      name: "Naujas turto vienetas",
       active: true,
       clubId: "",
       regionId: "",
@@ -2194,12 +2602,16 @@ function AssetObjectsAdmin({
       metadata: {},
     });
   };
+  const deleteAssetObject = (objectId: string) => {
+    if (!window.confirm("Ištrinti turto vienetą?")) return;
+    setAssetObjects(assetObjects.filter((object) => object.id !== objectId));
+  };
 
   return (
     <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 w-full md:w-auto">
-          <h2 className="text-xl font-bold">Turto objektai</h2>
+          <h2 className="text-xl font-bold">{heading}</h2>
           <div className="relative w-full md:w-64">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -2207,7 +2619,7 @@ function AssetObjectsAdmin({
             />
             <input
               type="text"
-              placeholder="Ieškoti objekto..."
+              placeholder="Ieškoti turto vieneto..."
               className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
@@ -2218,7 +2630,7 @@ function AssetObjectsAdmin({
           onClick={createAssetObject}
           className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
         >
-          <Plus size={16} /> Sukurti objektą
+          <Plus size={16} /> Sukurti turto vienetą
         </button>
       </div>
 
@@ -2227,7 +2639,9 @@ function AssetObjectsAdmin({
           <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
             <tr>
               <th className="px-4 py-3 text-left">Pavadinimas</th>
-              <th className="px-4 py-3 text-left">Turto tipas</th>
+              {!lockedAssetTypeId && (
+                <th className="px-4 py-3 text-left">Turto tipas</th>
+              )}
               <th className="px-4 py-3 text-left">Kodas</th>
               <th className="px-4 py-3 text-left">Klubas</th>
               <th className="px-4 py-3 text-left">Statusas</th>
@@ -2240,9 +2654,11 @@ function AssetObjectsAdmin({
                 <td className="px-4 py-3 font-bold text-slate-900">
                   {object.name}
                 </td>
-                <td className="px-4 py-3 font-semibold text-slate-600">
-                  {getAssetTypeLabel(object.assetTypeId)}
-                </td>
+                {!lockedAssetTypeId && (
+                  <td className="px-4 py-3 font-semibold text-slate-600">
+                    {getAssetTypeLabel(object.assetTypeId)}
+                  </td>
+                )}
                 <td className="px-4 py-3 font-mono text-xs text-slate-500">
                   {object.code}
                 </td>
@@ -2271,13 +2687,20 @@ function AssetObjectsAdmin({
                   >
                     <Edit2 size={16} />
                   </button>
+                  <button
+                    onClick={() => deleteAssetObject(object.id)}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600"
+                    title="Ištrinti"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </td>
               </tr>
             ))}
             {filteredObjects.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={lockedAssetTypeId ? 5 : 6}
                   className="py-8 text-center text-slate-500 font-medium"
                 >
                   Nerasta rezultatų
@@ -2289,12 +2712,13 @@ function AssetObjectsAdmin({
       </div>
 
       <AdminModal
-        title="Turto objektas"
+        title="Turto vienetas"
         isOpen={Boolean(editing)}
         onClose={() => setEditing(null)}
       >
         {editing && (
           <div className="space-y-4">
+            {!lockedAssetTypeId && (
             <label className="block space-y-1">
               <span className="text-[11px] font-black uppercase text-slate-400">
                 Turto tipas
@@ -2316,9 +2740,10 @@ function AssetObjectsAdmin({
                     <option key={assetType.id} value={assetType.id}>
                       {assetType.name}
                     </option>
-                  ))}
+                ))}
               </select>
             </label>
+            )}
 
             <label className="block space-y-1">
               <span className="text-[11px] font-black uppercase text-slate-400">
@@ -2420,19 +2845,29 @@ function AssetIssueTypesAdmin({
   assetTypes,
   issueTypes,
   setIssueTypes,
+  lockedAssetTypeId,
+  heading = "Gedimo tipai",
 }: {
   assetTypes: AssetType[];
   issueTypes: AssetIssueType[];
   setIssueTypes: React.Dispatch<React.SetStateAction<AssetIssueType[]>>;
+  lockedAssetTypeId?: string;
+  heading?: string;
 }) {
   const [editing, setEditing] = useState<AssetIssueType | null>(null);
   const defaultAssetTypeId =
+    lockedAssetTypeId ||
     assetTypes.find((assetType) => assetType.code === "EQUIPMENT")?.id ||
     assetTypes[0]?.id ||
     "asset-type-equipment";
   const getAssetTypeLabel = (assetTypeId: string) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
     assetTypeId;
+
+  const filteredIssueTypes = issueTypes.filter(
+    (issueType) =>
+      !lockedAssetTypeId || issueType.assetTypeId === lockedAssetTypeId,
+  );
 
   const saveIssueType = () => {
     if (!editing) return;
@@ -2474,14 +2909,18 @@ function AssetIssueTypesAdmin({
       legacyId: `asset-${Date.now()}`,
     });
   };
+  const deleteIssueType = (issueTypeId: string) => {
+    if (!window.confirm("Ištrinti gedimo tipą?")) return;
+    setIssueTypes(issueTypes.filter((issueType) => issueType.id !== issueTypeId));
+  };
 
   return (
     <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-xl font-bold">Asset Issue Types</h2>
+          <h2 className="text-xl font-bold">{heading}</h2>
           <p className="text-sm text-slate-500 font-medium">
-            Foundation sluoksnis būsimam SLA ir prioriteto valdymui per turto tipus.
+            Gedimo tipai naudojami SLA ir prioriteto valdymui pagal turto tipą.
           </p>
         </div>
         <button
@@ -2497,16 +2936,18 @@ function AssetIssueTypesAdmin({
           <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
             <tr>
               <th className="px-4 py-3 text-left">Pavadinimas</th>
-              <th className="px-4 py-3 text-left">Turto tipas</th>
+              {!lockedAssetTypeId && (
+                <th className="px-4 py-3 text-left">Turto tipas</th>
+              )}
               <th className="px-4 py-3 text-left">Prioritetas</th>
               <th className="px-4 py-3 text-left">SLA</th>
-              <th className="px-4 py-3 text-left">Default</th>
+              <th className="px-4 py-3 text-left">Numatytasis</th>
               <th className="px-4 py-3 text-left">Statusas</th>
               <th className="px-4 py-3 text-right">Veiksmai</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {issueTypes.map((issueType) => (
+            {filteredIssueTypes.map((issueType) => (
               <tr key={issueType.id} className="hover:bg-slate-50/70">
                 <td className="px-4 py-3">
                   <div className="font-bold text-slate-900">
@@ -2516,11 +2957,13 @@ function AssetIssueTypesAdmin({
                     {issueType.code}
                   </div>
                 </td>
-                <td className="px-4 py-3 font-semibold text-slate-600">
-                  {getAssetTypeLabel(issueType.assetTypeId)}
-                </td>
+                {!lockedAssetTypeId && (
+                  <td className="px-4 py-3 font-semibold text-slate-600">
+                    {getAssetTypeLabel(issueType.assetTypeId)}
+                  </td>
+                )}
                 <td className="px-4 py-3 font-bold uppercase text-slate-600">
-                  {issueType.priority}
+                  {getPriorityLabel(issueType.priority)}
                 </td>
                 <td className="px-4 py-3 font-bold text-slate-600">
                   {issueType.slaHours}h
@@ -2550,6 +2993,13 @@ function AssetIssueTypesAdmin({
                   >
                     <Edit2 size={16} />
                   </button>
+                  <button
+                    onClick={() => deleteIssueType(issueType.id)}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600"
+                    title="Ištrinti"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -2558,12 +3008,13 @@ function AssetIssueTypesAdmin({
       </div>
 
       <AdminModal
-        title="Asset Issue Type"
+        title="Gedimo tipas"
         isOpen={Boolean(editing)}
         onClose={() => setEditing(null)}
       >
         {editing && (
           <div className="space-y-4">
+            {!lockedAssetTypeId && (
             <label className="block space-y-1">
               <span className="text-[11px] font-black uppercase text-slate-400">
                 Turto tipas
@@ -2585,9 +3036,10 @@ function AssetIssueTypesAdmin({
                     <option key={assetType.id} value={assetType.id}>
                       {assetType.name}
                     </option>
-                  ))}
+                ))}
               </select>
             </label>
+            )}
 
             <label className="block space-y-1">
               <span className="text-[11px] font-black uppercase text-slate-400">
@@ -2630,10 +3082,10 @@ function AssetIssueTypesAdmin({
                   }
                   className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
                 >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="critical">Critical</option>
+                  <option value="low">Žemas</option>
+                  <option value="medium">Vidutinis</option>
+                  <option value="high">Aukštas</option>
+                  <option value="critical">Kritinis</option>
                 </select>
               </label>
 
@@ -2663,7 +3115,7 @@ function AssetIssueTypesAdmin({
                   setEditing({ ...editing, isDefault: event.target.checked })
                 }
               />
-              Default gedimo tipas
+              Numatytasis gedimo tipas
             </label>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -2710,13 +3162,9 @@ function WorkflowTypesAdmin({
     },
     [users],
   );
-  const getAssetTypeLabel = (assetTypeId?: string) =>
+  const getAssetTypeLabel = (assetTypeId?: string | null) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
-    "Bendrinis";
-  const defaultAssetTypeId =
-    assetTypes.find((assetType) => assetType.code === "GENERIC")?.id ||
-    assetTypes[0]?.id ||
-    "asset-type-generic";
+    "Be turto tipo";
 
   const saveWorkflow = () => {
     if (!editing || !setWorkflows) return;
@@ -2737,7 +3185,7 @@ function WorkflowTypesAdmin({
         ? editing.priorities
         : initialWorkflowTypes[0].priorities,
       objectType: editing.objectType || "GENERIC",
-      assetTypeId: editing.assetTypeId || defaultAssetTypeId,
+      assetTypeId: editing.assetTypeId || null,
       qrMode: editing.qrMode || "OFF",
       usesScope: editing.usesScope ?? false,
       ownerUserId: editing.ownerUserId ?? null,
@@ -2770,7 +3218,7 @@ function WorkflowTypesAdmin({
       category: "DARBAI",
       enabled: true,
       objectType: "GENERIC",
-      assetTypeId: defaultAssetTypeId,
+      assetTypeId: null,
       qrMode: "OFF",
       usesScope: false,
       ownerUserId: null,
@@ -2953,15 +3401,16 @@ function WorkflowTypesAdmin({
                   Turto tipas
                 </span>
                 <select
-                  value={editing.assetTypeId || defaultAssetTypeId}
+                  value={editing.assetTypeId || ""}
                   onChange={(event) =>
                     setEditing({
                       ...editing,
-                      assetTypeId: event.target.value,
+                      assetTypeId: event.target.value || null,
                     })
                   }
                   className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
                 >
+                  <option value="">Be turto tipo</option>
                   {assetTypes
                     .filter(
                       (assetType) =>
@@ -3307,7 +3756,7 @@ function ClubsAdmin({
               onChange={(e) => setShowArchived(e.target.checked)}
               className="h-4 w-4 accent-black"
             />
-            Show Archived
+            Rodyti archyvuotus
           </label>
         </div>
         <button
@@ -3400,7 +3849,7 @@ function ClubsAdmin({
                             onClick={() => archiveClub(club.id, false)}
                             className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
                           >
-                            Archive
+                            Archyvuoti
                           </button>
                         </>
                       ) : (
@@ -3414,7 +3863,7 @@ function ClubsAdmin({
                           <button
                             onClick={() => deleteClub(club)}
                             className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
-                            title="Delete"
+                            title="Ištrinti"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -3504,7 +3953,7 @@ function ClubsAdmin({
                       onClick={() => archiveClub(club.id, false)}
                       className="flex-1 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
                     >
-                      Archive
+                      Archyvuoti
                     </button>
                   </>
                 ) : (
@@ -3761,7 +4210,7 @@ function CitiesAdmin({
               onChange={(e) => setShowArchived(e.target.checked)}
               className="h-4 w-4 accent-black"
             />
-            Show Archived
+            Rodyti archyvuotus
           </label>
         </div>
         <button
@@ -3807,7 +4256,7 @@ function CitiesAdmin({
                           onClick={() => archiveCity(city.id, false)}
                           className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
                         >
-                          Archive
+                          Archyvuoti
                         </button>
                       </>
                     ) : (
@@ -3821,7 +4270,7 @@ function CitiesAdmin({
                         <button
                           onClick={() => deleteCity(city)}
                           className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
-                          title="Delete"
+                          title="Ištrinti"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -3875,7 +4324,7 @@ function CitiesAdmin({
                       onClick={() => archiveCity(city.id, false)}
                       className="px-3 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
                     >
-                      Archive
+                      Archyvuoti
                     </button>
                   </>
                 ) : (
@@ -4180,7 +4629,7 @@ function UsersAdmin({
               onChange={(e) => setShowArchived(e.target.checked)}
               className="h-4 w-4 accent-black"
             />
-            Show Archived
+            Rodyti archyvuotus
           </label>
         </div>
         <button
@@ -4290,7 +4739,7 @@ function UsersAdmin({
                           onClick={() => archiveUser(user.id, false)}
                           className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
                         >
-                          Archive
+                          Archyvuoti
                         </button>
                       </>
                     ) : (
@@ -4304,7 +4753,7 @@ function UsersAdmin({
                         <button
                           onClick={() => deleteUser(user)}
                           className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
-                          title="Delete"
+                          title="Ištrinti"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -4405,7 +4854,7 @@ function UsersAdmin({
                     onClick={() => archiveUser(user.id, false)}
                     className="flex-1 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
                   >
-                    Archive
+                    Archyvuoti
                   </button>
                 </>
               ) : (

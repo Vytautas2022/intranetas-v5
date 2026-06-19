@@ -258,6 +258,7 @@ export const filterBoardEntities = ({
 }: FilterBoardEntitiesParams): Fault[] => {
   const base = scopedEntities.filter((item) => {
     if (item.isDeleted) return false;
+    if (item.archivedAt) return false;
     if (activeTab === "kanban") return item.entityType === "fault";
     if (activeTab === "tasks") return item.entityType !== "fault";
     return false;

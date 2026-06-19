@@ -7,14 +7,57 @@ import { getEquipmentAssetObjects } from '../mock-db/assetObjects';
 import { Order } from '../mock-db/orders';
 import { cloneChecklistTemplatesForGeneratedCard } from './checklistLogic';
 import { workflowTypes as defaultWorkflowTypes } from '../mock-db/workflowTypes';
+import { users as defaultUsers, type User } from '../mock-db/users';
 import {
   resolvePeriodicDestinationWorkflowTypeId,
   type ResolvePeriodicDestinationWorkflowContext,
 } from './appWorkflowHelpers';
 import { getEquipmentIdentityFields, getFaultEquipmentId } from './equipmentFaultIdentity';
+import {
+  createPeriodicInstanceFromTemplate,
+  linkPeriodicInstanceOutput,
+} from '../mock-db/periodicInstances';
 
 const equipmentIssueTypesList = getLegacyEquipmentIssueTypes();
 const equipmentList = getEquipmentAssetObjects();
+
+const resolvePeriodicWorkflowAssignee = (
+  template: PeriodicTemplate,
+  club: Club,
+  workflowContext?: ResolvePeriodicDestinationWorkflowContext,
+): User | undefined => {
+  const activeUsers = defaultUsers.filter((user) => user.is_active !== false);
+  const templateAssigneeId =
+    template.assigneeId ||
+    template.assigned_to ||
+    template.assignedTo?.id ||
+    template.defaultResponsibleId;
+
+  const templateAssignee = templateAssigneeId
+    ? activeUsers.find(
+        (user) => user.id === templateAssigneeId || user.name === templateAssigneeId,
+      )
+    : undefined;
+  if (templateAssignee) return templateAssignee;
+
+  const workflowResolution = resolvePeriodicDestinationWorkflowTypeId(template, {
+    workflowTypes: workflowContext?.workflowTypes || defaultWorkflowTypes,
+    fallbackLegacyCategory: workflowContext?.fallbackLegacyCategory || 'OTHER',
+  });
+  const workflowOwnerId = workflowResolution.workflowTypeId
+    ? (workflowContext?.workflowTypes || defaultWorkflowTypes).find(
+        (workflow) => workflow.id === workflowResolution.workflowTypeId,
+      )?.ownerUserId
+    : undefined;
+  const workflowOwner = workflowOwnerId
+    ? activeUsers.find((user) => user.id === workflowOwnerId)
+    : undefined;
+  if (workflowOwner) return workflowOwner;
+
+  return club.coordinator_id
+    ? activeUsers.find((user) => user.id === club.coordinator_id)
+    : undefined;
+};
 
 export interface GenerationResult {
   newFaults: Fault[];
@@ -60,7 +103,7 @@ export const generatePeriodicWorksForClub = (
     
     if (template.targetSubmodule === 'UZSAKYMAI') {
         isDuplicate = existingOrders.some(o => {
-            const isSameTemplate = o.periodic?.templateId === template.id;
+            const isSameTemplate = (o as any).periodicTemplateId === template.id;
             const isSameClub = o.clubId === club.id;
             const isPeriodMatch = o.requestedAt >= monthStart.getTime() && o.requestedAt <= monthEnd.getTime();
             const isSameOrderType = template.orderType === (o.category === 'VENDING' ? 'VENDING' : (o.category === 'FIRST_AID_KIT' ? 'FIRST_AID_KIT' : 'SMULKUS'));
@@ -69,7 +112,9 @@ export const generatePeriodicWorksForClub = (
         });
     } else {
         isDuplicate = existingFaults.some(f => {
-          const isSameTemplate = f.template_id === template.id || (f.periodic && f.periodic.templateId === template.id);
+          const isSameTemplate =
+            f.periodicTemplateId === template.id ||
+            (f as any).template_id === template.id;
           const isSameClub = f.clubId === club.id;
           const isPeriodMatch = f.createdAt >= monthStart.getTime() && f.createdAt <= monthEnd.getTime();
           const isSourceMatch = f.source === 'PERIODIC' || f.generatedAutomatically;
@@ -96,8 +141,17 @@ export const generatePeriodicWorksForClub = (
       : monthEnd.getTime();
 
     if (template.targetSubmodule === 'UZSAKYMAI') {
+        const orderId = `ord-gen-${template.id}-${club.id}-${monthKey}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const periodicInstance = linkPeriodicInstanceOutput(
+          createPeriodicInstanceFromTemplate({
+            template,
+            club,
+            dueAt: dueDate,
+          }),
+          { orderId },
+        );
         const newOrder: Order = {
-            id: `ord-gen-${template.id}-${club.id}-${monthKey}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            id: orderId,
             code: `ORD-${format(now, 'yyyy')}-${template.id.slice(-4)}-${Math.random().toString(36).substr(2, 3).toUpperCase()}`,
             clubId: club.id,
             clubName: club.name,
@@ -123,8 +177,10 @@ export const generatePeriodicWorksForClub = (
             updatedAt: Date.now(),
             updatedBy: 'SISTEMA',
             checklists: cloneChecklistTemplatesForGeneratedCard(template),
+            periodicInstanceId: periodicInstance.id,
             periodic: {
               isPeriodic: true,
+              instanceId: periodicInstance.id,
               templateId: template.id,
               templateTitle: template.name || template.title
             }
@@ -162,27 +218,49 @@ export const generatePeriodicWorksForClub = (
           workflowTypes: workflowContext?.workflowTypes || defaultWorkflowTypes,
           fallbackLegacyCategory: workflowContext?.fallbackLegacyCategory || 'OTHER',
         });
+        const assignee = resolvePeriodicWorkflowAssignee(
+          template,
+          club,
+          workflowContext,
+        );
+        const faultId = `gen-${template.id}-${club.id}-${monthKey}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const periodicInstance = linkPeriodicInstanceOutput(
+          createPeriodicInstanceFromTemplate({
+            template: {
+              ...template,
+              slaHours: finalSla,
+              priority: finalPriority === 'critical' ? 'CRITICAL' : template.priority,
+            },
+            club,
+            responsibleUser: assignee,
+            dueAt: dueDate,
+          }),
+          { workflowCardId: faultId },
+        );
 
         const newFault: Fault = {
-          id: `gen-${template.id}-${club.id}-${monthKey}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          id: faultId,
           title: finalTitle,
           description: template.description,
           clubId: club.id,
           clubName: club.name,
           status: Status.NEW,
           type: template.targetSubmodule === 'EQUIPMENT_FAULT' ? 'EQUIPMENT_FAULT' : (template.department || 'Operacijos'),
-          entityType: 'task',
+          entityType: 'fault',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           priority: finalPriority,
-          source: 'PERIODIC',
-          template_id: template.id,
-          due_date: dueDate,
+          source: 'PERIODIC' as const,
+          periodicInstanceId: periodicInstance.id,
+          periodicTemplateId: template.id,
+          periodicType: template.criticality ?? (template.isMandatory ? 'CRITICAL' : 'STANDARD'),
+          periodicDueDate: typeof dueDate === 'number' ? dueDate : new Date(dueDate).getTime(),
           region: club.region,
           generatedAutomatically: true,
-          assigneeId: template.assigned_to || '',
-          assigneeName: template.assignedTo?.name || 'Nepriskirta',
-          assignedTo: template.assignedTo?.name || 'Nepriskirta',
+          assigned_to: assignee?.id || '',
+          assigneeId: assignee?.id || '',
+          assigneeName: assignee?.name || '',
+          assignedTo: assignee?.name || '',
           slaHours: finalSla,
           ...getEquipmentIdentityFields(equipmentId),
           issue_type_id: issueTypeId,
@@ -206,13 +284,6 @@ export const generatePeriodicWorksForClub = (
           category: template.targetSubmodule === 'EQUIPMENT_FAULT' ? 'EQUIPMENT_FAULT' : (template.department || 'OPERATIONS'),
           workflowTypeId: workflowResolution.workflowTypeId,
           checklists: cloneChecklistTemplatesForGeneratedCard(template),
-          periodic: {
-            isPeriodic: true,
-            templateId: template.id,
-            templateTitle: template.name || template.title,
-            generatedFromTemplate: true,
-            dueDate: dueDate
-          }
         };
     
         newFaults.push(newFault);

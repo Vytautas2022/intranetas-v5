@@ -1,6 +1,17 @@
+// SEED DATA FROZEN — DO NOT MODIFY (beta v1.0)
 import type { ChecklistTemplate } from "../types/checklists";
 
 export type PeriodicTemplateType = "MANDATORY" | "OPTIONAL";
+export type PeriodicCriticality = "CRITICAL" | "IMPORTANT" | "STANDARD";
+export type PeriodicDestinationType = "WORKFLOW_CARD" | "ORDER";
+export type PeriodicAssignmentStrategy =
+  | "TEMPLATE_ASSIGNEE"
+  | "WORKFLOW_OWNER"
+  | "CLUB_OWNER"
+  | "REGION_OWNER"
+  | "ROLE_QUEUE"
+  | "MANUAL_UNASSIGNED";
+export type PeriodicAssignmentSource = PeriodicAssignmentStrategy;
 export type RecurrenceType =
   | "daily"
   | "weekly"
@@ -8,7 +19,15 @@ export type RecurrenceType =
   | "quarterly"
   | "6_months"
   | "yearly"
-  | "custom_days";
+  | "custom_days"
+  | "custom_frequency";
+
+export interface PeriodicChecklistItem {
+  id: string;
+  order: number;
+  text: string;
+  required: boolean;
+}
 export type ResponsibleMode = "CLUB_COORDINATOR" | "OPS" | "MANUAL";
 
 export interface PeriodicTemplate {
@@ -19,7 +38,25 @@ export interface PeriodicTemplate {
   frequency: RecurrenceType; // From prompt: taskTemplate.frequency
   recurrence?: RecurrenceType; // Compatibility
   type: PeriodicTemplateType;
+  destinationType?: PeriodicDestinationType;
   destinationWorkflowTypeId?: string;
+  assignmentStrategy?: PeriodicAssignmentStrategy;
+  assignmentSource?: PeriodicAssignmentSource;
+  visibleWeeksBeforeDue: number;
+  customFrequencyValue?: number;
+  customFrequencyUnit?: "days" | "weeks" | "months";
+  executionChecklistItems?: PeriodicChecklistItem[];
+  requiresComment?: boolean;
+  requiresPhotoProof?: boolean;
+  isMandatory?: boolean;
+  criticality?: PeriodicCriticality;
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
+  /**
+   * @deprecated Compatibility only. New templates should use destinationType,
+   * destinationWorkflowTypeId, asset fields, and orderType.
+   */
   targetSubmodule?: "GENERAL" | "EQUIPMENT_FAULT" | "UZSAKYMAI";
   equipmentId?: string;
   issueTypeId?: string;
@@ -29,6 +66,7 @@ export interface PeriodicTemplate {
   dayOfWeek?: number; // Compatibility
   assigned_to?: string; // From prompt: taskTemplate.assigned_to
   assignedTo?: { id: string; name: string; role: string }; // Extended field
+  assigneeId?: string; // Flat assignee ID (used by TemplateEditModal assignee picker)
   priority?: "CRITICAL" | "IMPORTANT";
   defaultResponsibleId?: string; // Compatibility
   targetMode: "ALL_CLUBS" | "SELECTED_CLUBS" | "REGIONS";
@@ -89,13 +127,33 @@ export interface PeriodicTemplate {
   };
 }
 
+export type PeriodicTemplateRemovalAction = "DELETE_ALLOWED" | "ARCHIVE_ONLY";
+
+export const getPeriodicTemplateRemovalAction = (
+  templateId: string,
+  history: Array<{ templateId?: string }> = [],
+  instances: Array<{ templateId?: string; history?: unknown[] }> = [],
+): PeriodicTemplateRemovalAction => {
+  const hasHistory =
+    history.some((record) => record.templateId === templateId) ||
+    instances.some(
+      (instance) =>
+        instance.templateId === templateId && Boolean(instance.history?.length),
+    );
+
+  return hasHistory ? "ARCHIVE_ONLY" : "DELETE_ALLOWED";
+};
+
 export const mockPeriodicTemplates: PeriodicTemplate[] = [
   {
     id: "PT_WATER",
     name: "Vandens tyrimai",
     title: "Vandens tyrimai",
     description: "Baseino ir dušo vandens mikrobiologinis tyrimas",
+    destinationWorkflowTypeId: "facility-work",
     type: "MANDATORY",
+    criticality: "CRITICAL" as const,
+    visibleWeeksBeforeDue: 4,
     frequency: "monthly",
     recurrence: "monthly",
     default_day: 5,
@@ -131,7 +189,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Lauko langų valymas",
     title: "Lauko langų valymas",
     description: "Klubo fasado stiklų valymas",
+    destinationWorkflowTypeId: "facility-work",
     type: "OPTIONAL",
+    criticality: "STANDARD" as const,
+    visibleWeeksBeforeDue: 2,
     frequency: "quarterly",
     recurrence: "quarterly",
     targetMode: "SELECTED_CLUBS",
@@ -162,7 +223,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Sijų / aukštų zonų valymas",
     title: "Sijų / aukštų zonų valymas",
     description: "Dulkių valymas nuo aukštų konstrukcijų ir sijų",
+    destinationWorkflowTypeId: "facility-work",
     type: "OPTIONAL",
+    criticality: "STANDARD" as const,
+    visibleWeeksBeforeDue: 2,
     frequency: "monthly",
     recurrence: "monthly",
     default_day: 15,
@@ -195,7 +259,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Gesintuvų patikra",
     title: "Gesintuvų patikra",
     description: "Priešgaisrinių gesintuvų techninė būklė",
+    destinationWorkflowTypeId: "facility-work",
     type: "MANDATORY",
+    criticality: "CRITICAL" as const,
+    visibleWeeksBeforeDue: 4,
     frequency: "monthly",
     recurrence: "monthly",
     default_day: 1,
@@ -227,7 +294,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Klimato sistemos aptarnavimas",
     title: "Klimato sistemos aptarnavimas",
     description: "Vėdinimo ir kondicionavimo filtrų keitimas",
+    destinationWorkflowTypeId: "facility-work",
     type: "MANDATORY",
+    criticality: "CRITICAL" as const,
+    visibleWeeksBeforeDue: 4,
     frequency: "monthly",
     recurrence: "monthly",
     default_day: 10,
@@ -260,7 +330,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Valymo kokybės auditas",
     title: "Valymo kokybės auditas",
     description: "Bendros švaros ir higienos auditas",
+    destinationWorkflowTypeId: "facility-work",
     type: "OPTIONAL",
+    criticality: "STANDARD" as const,
+    visibleWeeksBeforeDue: 2,
     frequency: "weekly",
     recurrence: "weekly",
     default_day: 2,
@@ -291,7 +364,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Dušų / persirengimo patikra",
     title: "Dušų / persirengimo patikra",
     description: "Techninė dušų ir spintelių būklės patikra",
+    destinationWorkflowTypeId: "facility-work",
     type: "OPTIONAL",
+    criticality: "STANDARD" as const,
+    visibleWeeksBeforeDue: 2,
     frequency: "daily",
     recurrence: "daily",
     targetMode: "ALL_CLUBS",
@@ -321,7 +397,10 @@ export const mockPeriodicTemplates: PeriodicTemplate[] = [
     name: "Turniketų / praėjimo sistemos patikra",
     title: "Turniketų / praėjimo sistemos patikra",
     description: "Praėjimo sistemos funkcionalumo patikra",
+    destinationWorkflowTypeId: "facility-work",
     type: "MANDATORY",
+    criticality: "IMPORTANT" as const,
+    visibleWeeksBeforeDue: 2,
     frequency: "weekly",
     recurrence: "weekly",
     default_day: 1,

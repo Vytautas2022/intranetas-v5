@@ -20,6 +20,7 @@ import {
   endOfDay,
   subDays,
   addDays,
+  isBefore,
 } from "date-fns";
 import { lt } from "date-fns/locale";
 import {
@@ -229,6 +230,11 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ occurrence?: PeriodicOccurrence, template?: any } | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [selectedOccurrence, setSelectedOccurrence] = useState<PeriodicOccurrence | null>(null);
+  const activeClubs = useMemo(
+    () => clubs.filter((club) => (club.isActive ?? club.is_active) === true),
+    [],
+  );
 
   // Memoized visible weeks based on current date and view mode
   const visibleWeeks = useMemo(() => {
@@ -293,24 +299,28 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
   }, [monthGroups, filteredWeeks]);
 
   const handleCancelOccurrence = (occurrence: PeriodicOccurrence, reason: string) => {
-    setLocalTemplates(prev => prev.map(t => {
-      if (t.id === occurrence.taskId) {
-        return {
-          ...t,
-          occurrenceOverrides: {
-            ...(t.occurrenceOverrides || {}),
-            [occurrence.occurrenceId]: {
-              ...occurrence,
-              status: 'cancelled',
-              cancelledAt: Date.now(),
-              cancelledBy: 'Dabartinis Vartotojas',
-              cancelReason: reason
+    setLocalTemplates(prev => {
+      const next = prev.map(t => {
+        if (t.id === occurrence.taskId) {
+          return {
+            ...t,
+            occurrenceOverrides: {
+              ...(t.occurrenceOverrides || {}),
+              [occurrence.occurrenceId]: {
+                ...occurrence,
+                status: 'cancelled',
+                cancelledAt: Date.now(),
+                cancelledBy: 'Dabartinis Vartotojas',
+                cancelReason: reason
+              }
             }
-          }
-        };
-      }
-      return t;
-    }));
+          };
+        }
+        return t;
+      });
+      setTemplates?.(next);
+      return next;
+    });
 
     createAuditLogEntry({
       moduleId: "periodic",
@@ -360,13 +370,22 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
     setCancelReason("");
   };
 
-  const mapStatusToStyles = (status: OccurrenceStatus) => {
+  const mapStatusToStyles = (status: OccurrenceStatus, isPast = false) => {
+    if (isPast) {
+      switch (status) {
+        case 'completed_on_time': return { bg: 'bg-green-200', text: 'text-green-800', icon: 'OK' };
+        case 'completed_late': return { bg: 'bg-orange-200', text: 'text-orange-700', icon: 'OK' };
+        case 'overdue': return { bg: 'bg-red-200', text: 'text-red-800', icon: '!' };
+        case 'cancelled': return { bg: 'bg-slate-200', text: 'text-slate-400', icon: 'X', decoration: 'line-through' };
+        default: return { bg: 'bg-slate-100', text: 'text-slate-400', icon: '' };
+      }
+    }
     switch (status) {
       case 'planned': return { bg: 'bg-yellow-400', text: 'text-white', icon: 'V' };
-      case 'completed_on_time': return { bg: 'bg-emerald-500', text: 'text-white', icon: '✓' };
+      case 'completed_on_time': return { bg: 'bg-emerald-500', text: 'text-white', icon: 'OK' };
       case 'overdue': return { bg: 'bg-rose-500', text: 'text-white', icon: '!' };
-      case 'completed_late': return { bg: 'bg-orange-500', text: 'text-white', icon: '✓' };
-      case 'cancelled': return { bg: 'bg-slate-200', text: 'text-slate-400', icon: '✕', decoration: 'line-through' };
+      case 'completed_late': return { bg: 'bg-orange-500', text: 'text-white', icon: 'OK' };
+      case 'cancelled': return { bg: 'bg-slate-200', text: 'text-slate-400', icon: 'X', decoration: 'line-through' };
       default: return { bg: 'bg-slate-100', text: 'text-slate-400', icon: '' };
     }
   };
@@ -379,16 +398,10 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
   const filteredTemplates = useMemo(() => {
     return localTemplates.filter(
       (t) =>
-        (!filters.search ||
-          t.title.toLowerCase().includes(filters.search.toLowerCase())) &&
-        (filters.department === "Visi" ||
-          (t.department || "Operacijos") === filters.department) &&
-        (filters.assignee === "Visi" || t.assigned_to === filters.assignee) &&
-        (filters.status === "Visi" ||
-          (filters.status === "Aktyvios" && t.isActive) ||
-          (filters.status === "Neaktyvios" && !t.isActive)) &&
-        (filters.applicationType === "Visi" ||
-          (t.applicationType || "CLUB") === filters.applicationType),
+        filters.assignee === "Visi" ||
+        t.assigned_to === filters.assignee ||
+        t.assignedTo?.id === filters.assignee ||
+        t.defaultResponsibleId === filters.assignee,
     );
   }, [localTemplates, filters]);
 
@@ -413,6 +426,13 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
       type: "MANDATORY",
       recurrence: "monthly",
       scope: "ALL",
+      destinationType: "WORKFLOW_CARD",
+      assignmentStrategy: "MANUAL_UNASSIGNED",
+      assignmentSource: "MANUAL_UNASSIGNED",
+      visibleWeeksBeforeDue: 4,
+      requiresComment: false,
+      requiresPhotoProof: false,
+      isMandatory: true,
       applicationType: "CLUB",
       department: "Operacijos",
       isActive: false,
@@ -492,16 +512,39 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
   };
 
   const regions = Array.from(
-    new Set(clubs.map((c) => c.region).filter(Boolean)),
-  );
-  const filteredClubs = clubs.filter(
+    new Set(activeClubs.map((c) => c.region).filter(Boolean)),
+  ).sort();
+  const assignedUserIds = new Set<string>();
+  localTemplates.forEach((template) => {
+    const directAssignee =
+      template.assigned_to || template.assignedTo?.id || template.defaultResponsibleId;
+    if (directAssignee) assignedUserIds.add(directAssignee);
+
+    const targetClubIds =
+      template.targetMode === "ALL_CLUBS" || template.scope === "ALL"
+        ? activeClubs.map((club) => club.id)
+        : template.targetMode === "REGIONS"
+          ? activeClubs
+              .filter((club) => template.targetRegions?.includes(club.region || ""))
+              .map((club) => club.id)
+          : template.targetClubIds || [];
+
+    targetClubIds.forEach((clubId) => {
+      const coordinatorId = activeClubs.find((club) => club.id === clubId)?.coordinator_id;
+      if (coordinatorId) assignedUserIds.add(coordinatorId);
+    });
+  });
+  const assignedUsers = users
+    .filter((user) => user.is_active !== false && assignedUserIds.has(user.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const filteredClubs = activeClubs.filter(
     (c) =>
       (!filters.region || c.region === filters.region) &&
       (!filters.clubIds.length || filters.clubIds.includes(c.id)),
   );
 
   return (
-    <div className="p-3 md:p-6 space-y-6 bg-slate-50 min-h-full">
+    <div className="p-3 md:p-6 space-y-6 bg-slate-50 min-h-full overflow-y-auto">
       {/* Navigation and Period Selector */}
       {viewMode === "calendar" && (
         <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto no-scrollbar gap-4">
@@ -640,178 +683,67 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
       </div>
 
       {/* Filters Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex-1 min-w-[240px]">
-            <div className="relative">
-              <SearchIcon
-                size={18}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                type="text"
-                placeholder="Ieškoti užduoties pavadinimo..."
-                value={filters.search}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, search: e.target.value }))
-                }
-                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#d9f945]/50 transition-colors"
-              />
-            </div>
-          </div>
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <select
+            onChange={(e) =>
+              setFilters((prev) => ({
+                ...prev,
+                region: e.target.value,
+                clubIds: [],
+              }))
+            }
+            value={filters.region}
+            className="p-2 px-4 border border-slate-200 rounded-xl text-sm font-bold bg-slate-50 text-slate-700"
+          >
+            <option value="">Regionas</option>
+            {regions.map((region) => (
+              <option key={region} value={region}>
+                {region}
+              </option>
+            ))}
+          </select>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-100">
-              <span className="text-[10px] font-black text-slate-400 uppercase pl-2 pr-1">
-                Tipas:
-              </span>
-              <select
-                value={filters.applicationType}
-                onChange={(e) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    applicationType: e.target.value,
-                  }))
-                }
-                className="bg-transparent text-sm font-bold text-slate-700 focus:outline-none p-1.5 pr-4"
-              >
-                <option value="Visi">Visi</option>
-                <option value="GENERAL">Bendrosios</option>
-                <option value="CLUB">Klubų</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-100">
-              <span className="text-[10px] font-black text-slate-400 uppercase pl-2 pr-1">
-                Skyrius:
-              </span>
-              <select
-                value={filters.department}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, department: e.target.value }))
-                }
-                className="bg-transparent text-sm font-bold text-slate-700 focus:outline-none p-1.5 pr-4"
-              >
-                <option value="Visi">Visi</option>
-                <option value="Operacijos">Operacijos</option>
-                <option value="Marketingas">Marketingas</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-100">
-              <span className="text-[10px] font-black text-slate-400 uppercase pl-2 pr-1">
-                Statusas:
-              </span>
-              <select
-                value={filters.status}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, status: e.target.value }))
-                }
-                className="bg-transparent text-sm font-bold text-slate-700 focus:outline-none p-1.5 pr-4"
-              >
-                <option value="Visi">Visi</option>
-                <option value="Aktyvios">Aktyvios</option>
-                <option value="Neaktyvios">Neaktyvios</option>
-              </select>
-            </div>
-
-            {viewMode === "calendar" && (
-              <div className="flex items-center gap-2">
-                <div className="w-px h-8 bg-slate-100 mx-2 hidden lg:block" />
-                <div className="flex gap-2">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase ml-1">
-                      Nuo
-                    </span>
-                    <input
-                      type="date"
-                      value={filters.dateFrom}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          dateFrom: e.target.value,
-                        }))
-                      }
-                      className="p-1.5 px-3 border border-slate-100 bg-slate-50 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#d9f945]"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[9px] font-black text-slate-400 uppercase ml-1">
-                      Iki
-                    </span>
-                    <input
-                      type="date"
-                      value={filters.dateTo}
-                      onChange={(e) =>
-                        setFilters((prev) => ({
-                          ...prev,
-                          dateTo: e.target.value,
-                        }))
-                      }
-                      className="p-1.5 px-3 border border-slate-100 bg-slate-50 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#d9f945]"
-                    />
-                  </div>
-                </div>
-              </div>
+          <ClubDropdown
+            clubs={activeClubs.filter(
+              (club) => !filters.region || club.region === filters.region,
             )}
-          </div>
-        </div>
+            selectedClubIds={filters.clubIds}
+            onChange={(ids) => setFilters((prev) => ({ ...prev, clubIds: ids }))}
+          />
 
-        {viewMode === "calendar" && (
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-50">
-            <select
-              onChange={(e) =>
-                setFilters((prev) => ({
-                  ...prev,
-                  region: e.target.value,
-                  clubIds: [],
-                }))
-              }
-              value={filters.region}
-              className="p-2 px-4 border border-slate-200 rounded-xl text-xs font-bold bg-slate-50 text-slate-700 min-w-[150px]"
-            >
-              <option value="">Visi regionai</option>
-              {regions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            <div className="w-64">
-              <ClubDropdown
-                clubs={clubs.filter(
-                  (c) => !filters.region || c.region === filters.region,
-                )}
-                selectedClubIds={filters.clubIds}
-                onChange={(ids) =>
-                  setFilters((prev) => ({ ...prev, clubIds: ids }))
-                }
-              />
-            </div>
-            <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-100">
-              <span className="text-[10px] font-black text-slate-400 uppercase pl-2 pr-1">
-                Atsakingas:
-              </span>
-              <select
-                onChange={(e) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    assignee: e.target.value,
-                  }))
-                }
-                value={filters.assignee}
-                className="bg-transparent text-sm font-bold text-slate-700 focus:outline-none p-1.5 pr-4"
-              >
-                <option value="Visi">Visi</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
+          <select
+            onChange={(e) =>
+              setFilters((prev) => ({
+                ...prev,
+                assignee: e.target.value,
+              }))
+            }
+            value={filters.assignee}
+            className="p-2 px-4 border border-slate-200 rounded-xl text-sm font-bold bg-slate-50 text-slate-700"
+          >
+            <option value="Visi">Atsakingas</option>
+            {assignedUsers.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="date"
+            value={filters.dateFrom}
+            onChange={(e) => {
+              setFilters((prev) => ({
+                ...prev,
+                dateFrom: e.target.value,
+                dateTo: e.target.value,
+              }));
+              if (e.target.value) setCurrentDate(new Date(e.target.value));
+            }}
+            className="p-2 px-4 border border-slate-200 rounded-xl text-sm font-bold bg-slate-50 text-slate-700"
+          />
+        </div>
       </div>
 
       {isLoading ? (
@@ -903,8 +835,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                                     : "OPS"}
                                 </span>
                                 <span className="line-clamp-2 leading-tight">
-                                  {template.priority === "CRITICAL" && "🔴 "}
-                                  {template.priority === "IMPORTANT" && "🟡 "}
+                                  {(template.priority === "CRITICAL" || template.criticality === "CRITICAL") && "🔴 "}
+                                  {(template.priority === "IMPORTANT" || template.criticality === "IMPORTANT") && "🟡 "}
                                   {template.title}
                                 </span>
                                 {!template.isActive && (
@@ -919,7 +851,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                             const occ = occurrences.find(
                               (o) => o.taskId === template.id && o.plannedWeek === w
                             );
-                            const styles = occ ? mapStatusToStyles(occ.status) : null;
+                            const isPastOcc = occ ? isBefore(startOfDay(new Date(occ.plannedDate)), startOfDay(new Date())) : false;
+                            const styles = occ ? mapStatusToStyles(occ.status, isPastOcc) : null;
 
                             return (
                               <td
@@ -928,30 +861,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                                   "p-1 text-center cursor-pointer border-r border-slate-100 last:border-0",
                                   occ ? "bg-slate-50/50" : "hover:bg-slate-100",
                                 )}
-                                onClick={(e) => {
-                                  if (occ) {
-                                    if (occ.status === 'cancelled') return;
-                                    const isCompleted = occ.status === 'completed_on_time' || occ.status === 'completed_late';
-                                    const newStatus = isCompleted ? 'planned' : 'completed_on_time';
-                                    
-                                    setLocalTemplates(prev => prev.map(t => {
-                                      if (t.id === template.id) {
-                                        return {
-                                          ...t,
-                                          occurrenceOverrides: {
-                                            ...(t.occurrenceOverrides || {}),
-                                            [occ.occurrenceId]: {
-                                              ...occ,
-                                              status: newStatus,
-                                              completedAt: isCompleted ? null : Date.now(),
-                                              completedBy: isCompleted ? null : 'Vartotojas'
-                                            }
-                                          }
-                                        };
-                                      }
-                                      return t;
-                                    }));
-                                  }
+                                onClick={() => {
+                                  if (occ && occ.status !== 'cancelled') setSelectedOccurrence(occ);
                                 }}
                                 onContextMenu={(e) => {
                                   if (occ) {
@@ -963,25 +874,13 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                               >
                                 {occ ? (
                                   <div className={cn(
-                                    "w-6 h-6 rounded-lg mx-auto flex items-center justify-center shadow-sm relative group/occ",
+                                    "w-6 h-6 rounded-lg mx-auto flex items-center justify-center shadow-sm",
                                     styles?.bg,
                                     styles?.text
                                   )}>
                                     <span className={cn("font-black text-[10px]", styles?.decoration)}>
                                       {styles?.icon}
                                     </span>
-                                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white border border-slate-200 rounded-lg shadow-xl p-1 hidden group-hover/occ:flex gap-1 z-[100]">
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setCancelTarget({ occurrence: occ });
-                                          setIsCancelModalOpen(true);
-                                        }}
-                                        className="p-1 hover:bg-red-50 text-red-500 rounded transition-colors"
-                                      >
-                                        <X size={12} />
-                                      </button>
-                                    </div>
                                   </div>
                                 ) : (
                                   <div className="w-2 h-2 rounded-full border-2 border-slate-200 mx-auto opacity-30" />
@@ -1081,8 +980,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                                     : "OPS"}
                                 </span>
                                 <span className="line-clamp-2 leading-tight">
-                                  {template.priority === "CRITICAL" && "🔴 "}
-                                  {template.priority === "IMPORTANT" && "🟡 "}
+                                  {(template.priority === "CRITICAL" || template.criticality === "CRITICAL") && "🔴 "}
+                                  {(template.priority === "IMPORTANT" || template.criticality === "IMPORTANT") && "🟡 "}
                                   {template.title}
                                 </span>
                                 {!template.isActive && (
@@ -1103,7 +1002,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                             const occ = occurrences.find(
                               (o) => o.taskId === template.id && o.objectId === club.id && o.plannedWeek === w
                             );
-                            const styles = occ ? mapStatusToStyles(occ.status) : null;
+                            const isPastOcc = occ ? isBefore(startOfDay(new Date(occ.plannedDate)), startOfDay(new Date())) : false;
+                            const styles = occ ? mapStatusToStyles(occ.status, isPastOcc) : null;
                             
                             return (
                               <td
@@ -1112,32 +1012,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                                   "p-1 text-center cursor-pointer border-r border-slate-100 last:border-0",
                                   occ ? "bg-slate-50/50" : "hover:bg-slate-100",
                                 )}
-                                onClick={(e) => {
-                                  if (occ) {
-                                    // For now, toggle completed if not cancelled
-                                    if (occ.status === 'cancelled') return;
-                                    
-                                    const isCompleted = occ.status === 'completed_on_time' || occ.status === 'completed_late';
-                                    const newStatus = isCompleted ? 'planned' : 'completed_on_time';
-                                    
-                                    setLocalTemplates(prev => prev.map(t => {
-                                      if (t.id === template.id) {
-                                        return {
-                                          ...t,
-                                          occurrenceOverrides: {
-                                            ...(t.occurrenceOverrides || {}),
-                                            [occ.occurrenceId]: {
-                                              ...occ,
-                                              status: newStatus,
-                                              completedAt: isCompleted ? null : Date.now(),
-                                              completedBy: isCompleted ? null : 'Vartotojas'
-                                            }
-                                          }
-                                        };
-                                      }
-                                      return t;
-                                    }));
-                                  }
+                                onClick={() => {
+                                  if (occ && occ.status !== 'cancelled') setSelectedOccurrence(occ);
                                 }}
                                 onContextMenu={(e) => {
                                   if (occ) {
@@ -1149,28 +1025,13 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                               >
                                 {occ ? (
                                   <div className={cn(
-                                    "w-6 h-6 rounded-lg mx-auto flex items-center justify-center shadow-sm relative group/occ",
+                                    "w-6 h-6 rounded-lg mx-auto flex items-center justify-center shadow-sm",
                                     styles?.bg,
                                     styles?.text
                                   )}>
                                     <span className={cn("font-black text-[10px]", styles?.decoration)}>
                                       {styles?.icon}
                                     </span>
-                                    
-                                    {/* Action buttons on hover */}
-                                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white border border-slate-200 rounded-lg shadow-xl p-1 hidden group-hover/occ:flex gap-1 z-[100]">
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setCancelTarget({ occurrence: occ });
-                                          setIsCancelModalOpen(true);
-                                        }}
-                                        className="p-1 hover:bg-red-50 text-red-500 rounded transition-colors"
-                                        title="Atšaukti įvykį"
-                                      >
-                                        <X size={12} />
-                                      </button>
-                                    </div>
                                   </div>
                                 ) : (
                                   <div className="w-2 h-2 rounded-full border-2 border-slate-200 mx-auto opacity-30" />
@@ -1248,13 +1109,10 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
         </div>
       )}
       {isModalOpen && selectedTemplate && (
-        <TemplateEditModalImproved
+        <TemplateEditModal
           template={selectedTemplate}
           onClose={() => setIsModalOpen(false)}
           onSave={handleSaveTemplate}
-          clubs={clubs}
-          users={users}
-          workflowTypes={workflowTypes}
         />
       )}
 
@@ -1341,6 +1199,128 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
           </motion.div>
         </div>
       )}
+
+      {selectedOccurrence !== null && (() => {
+        const occ = selectedOccurrence;
+        const isPast = isBefore(startOfDay(new Date(occ.plannedDate)), startOfDay(new Date()));
+        const occClubName = activeClubs.find(c => c.id === occ.objectId)?.name;
+        const statusLabelsLt: Record<OccurrenceStatus, string> = {
+          planned: 'Suplanuota',
+          completed_on_time: 'Atlikta laiku',
+          completed_late: 'Atlikta velai',
+          overdue: 'Veluoja',
+          cancelled: 'Atsaukta',
+        };
+        const occStyles = mapStatusToStyles(occ.status);
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">{occ.title}</h3>
+                  {occClubName && <p className="text-xs text-slate-500 font-medium mt-0.5">{occClubName}</p>}
+                  {isPast && <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mt-1">Praeities irasas — tik perziura</p>}
+                </div>
+                <button onClick={() => setSelectedOccurrence(null)} className="p-2 hover:bg-white rounded-xl transition-colors">
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Numatyta</span>
+                  <span className="font-bold text-slate-900 text-sm">{occ.plannedDate}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Statusas</span>
+                  <span className={cn("px-2.5 py-1 rounded-xl text-xs font-black", occStyles.bg, occStyles.text)}>
+                    {statusLabelsLt[occ.status]}
+                  </span>
+                </div>
+                {occ.completedAt && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Atlikta</span>
+                    <span className="text-sm text-slate-700">{new Date(occ.completedAt).toLocaleDateString('lt-LT')}</span>
+                  </div>
+                )}
+                {occ.cancelReason && (
+                  <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600">
+                    <span className="font-black uppercase tracking-widest text-slate-400">Priezastis: </span>
+                    {occ.cancelReason}
+                  </div>
+                )}
+                {(occ as any).workflowCardId && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Kortele</span>
+                    <span className="text-xs font-bold text-blue-600">#{(occ as any).workflowCardId}</span>
+                  </div>
+                )}
+              </div>
+              {!isPast && occ.status !== 'cancelled' && (
+                <div className="p-6 pt-0 flex gap-3">
+                  <button
+                    onClick={() => {
+                      const isCompleted = occ.status === 'completed_on_time' || occ.status === 'completed_late';
+                      setLocalTemplates(prev => {
+                        const next = prev.map(t => {
+                          if (t.id !== occ.taskId) return t;
+                          return {
+                            ...t,
+                            occurrenceOverrides: {
+                              ...(t.occurrenceOverrides || {}),
+                              [occ.occurrenceId]: {
+                                ...occ,
+                                status: isCompleted ? 'planned' : 'completed_on_time',
+                                completedAt: isCompleted ? null : Date.now(),
+                                completedBy: isCompleted ? null : 'Vartotojas',
+                              }
+                            }
+                          };
+                        });
+                        setTemplates?.(next);
+                        return next;
+                      });
+                      setSelectedOccurrence(null);
+                    }}
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-colors shadow-sm"
+                  >
+                    {occ.status === 'completed_on_time' || occ.status === 'completed_late' ? 'Atzymeti' : 'Atlikti'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const tmpl = localTemplates.find(t => t.id === occ.taskId);
+                      const crit = tmpl?.criticality ?? (tmpl?.isMandatory ? 'CRITICAL' : 'STANDARD');
+                      if (crit === 'CRITICAL') {
+                        alert('Kritine uzduotis negali buti ataukta.');
+                        return;
+                      }
+                      setSelectedOccurrence(null);
+                      setCancelTarget({ occurrence: occ });
+                      setIsCancelModalOpen(true);
+                    }}
+                    className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                  >
+                    Atsaukti
+                  </button>
+                </div>
+              )}
+              {(isPast || occ.status === 'cancelled') && (
+                <div className="p-6 pt-0">
+                  <button
+                    onClick={() => setSelectedOccurrence(null)}
+                    className="w-full py-3 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                  >
+                    Uzdaryti
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -1825,6 +1805,7 @@ const TemplateEditModalImproved = ({
                   onChange={(e) =>
                     setFormData({
                       ...formData,
+                      destinationType: e.target.value ? "WORKFLOW_CARD" : formData.destinationType,
                       destinationWorkflowTypeId: e.target.value || undefined,
                     })
                   }

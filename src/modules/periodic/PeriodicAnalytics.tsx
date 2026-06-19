@@ -211,7 +211,7 @@ export const PeriodicAnalytics: React.FC<PeriodicAnalyticsProps> = ({ faults, hi
                 <table className="w-full text-sm text-slate-700">
                   <thead className="sticky top-0 bg-white">
                     <tr className="text-left text-slate-500 border-b border-slate-100">
-                      <th className="pb-3">Template</th>
+                      <th className="pb-3">Šablonas</th>
                       <th className="pb-3">Klubas</th>
                       <th className="pb-3">Kaina</th>
                     </tr>

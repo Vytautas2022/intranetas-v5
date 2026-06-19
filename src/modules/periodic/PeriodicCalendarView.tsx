@@ -1,17 +1,25 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
-  getWeek,
-  startOfYear,
+  addMonths,
+  addWeeks,
+  endOfMonth,
+  endOfWeek,
   endOfYear,
-  eachWeekOfInterval,
-  getMonth,
-  addDays,
-  getYear,
+  format,
+  isWithinInterval,
+  startOfMonth,
+  startOfWeek,
+  startOfYear,
 } from "date-fns";
+import { lt } from "date-fns/locale";
+import { CalendarDays, CheckCircle2, Clock, ExternalLink, X } from "lucide-react";
+import { users } from "../../mock-db/users";
+import { workflowTypes } from "../../mock-db/workflowTypes";
+import {
+  buildPeriodicInstancesForRange,
+  type PeriodicInstance,
+} from "../../mock-db/periodicInstances";
 import { cn } from "../../lib/utils";
-import { Check, X, Circle, AlertCircle } from "lucide-react";
-import { Status } from "../../types/faults";
-import { normalizeWorkflowStatusId } from "../../logic/statusLabels";
 
 interface Props {
   faults?: any[];
@@ -21,6 +29,61 @@ interface Props {
   onOpenCard?: (id: string) => void;
 }
 
+type ViewMode = "week" | "month" | "quarter" | "halfYear" | "year";
+
+const viewModeLabels: Record<ViewMode, string> = {
+  week: "Savaitė",
+  month: "Mėnuo",
+  quarter: "3 mėn",
+  halfYear: "6 mėn",
+  year: "Metai",
+};
+
+const statusLabels: Record<PeriodicInstance["status"], string> = {
+  SCHEDULED: "Suplanuota",
+  IN_PROGRESS: "Vykdoma",
+  COMPLETED: "Atlikta",
+  REJECTED: "Atmesta",
+  OVERDUE: "Vėluoja",
+  SKIPPED: "Praleista",
+};
+
+const statusClass: Record<PeriodicInstance["status"], string> = {
+  SCHEDULED: "bg-slate-100 text-slate-700",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  COMPLETED: "bg-emerald-100 text-emerald-700",
+  REJECTED: "bg-zinc-200 text-zinc-700",
+  OVERDUE: "bg-red-100 text-red-700",
+  SKIPPED: "bg-gray-100 text-gray-600",
+};
+
+const getRange = (mode: ViewMode, anchor: Date) => {
+  if (mode === "week") {
+    return {
+      start: startOfWeek(anchor, { weekStartsOn: 1 }),
+      end: endOfWeek(anchor, { weekStartsOn: 1 }),
+    };
+  }
+  if (mode === "quarter") {
+    const start = startOfMonth(anchor);
+    return { start, end: endOfMonth(addMonths(start, 2)) };
+  }
+  if (mode === "halfYear") {
+    const start = startOfMonth(anchor);
+    return { start, end: endOfMonth(addMonths(start, 5)) };
+  }
+  if (mode === "year") {
+    return { start: startOfYear(anchor), end: endOfYear(anchor) };
+  }
+  return { start: startOfMonth(anchor), end: endOfMonth(anchor) };
+};
+
+const getAssigneeName = (assigneeId?: string) =>
+  users.find((user) => user.id === assigneeId)?.name || assigneeId || "Nepriskirta";
+
+const formatDate = (value?: number) =>
+  value ? format(new Date(value), "yyyy-MM-dd", { locale: lt }) : "-";
+
 export const PeriodicCalendarView: React.FC<Props> = ({
   faults = [],
   templates = [],
@@ -28,333 +91,422 @@ export const PeriodicCalendarView: React.FC<Props> = ({
   clubs = [],
   onOpenCard,
 }) => {
-  const today = new Date();
-  const currentWeekNum = getWeek(today, { weekStartsOn: 1 });
-  const currentYear = today.getFullYear();
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
+  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [selectedInstance, setSelectedInstance] = useState<PeriodicInstance | null>(null);
+  const [filters, setFilters] = useState({
+    region: "",
+    assigneeId: "",
+    clubId: "",
+    date: "",
+  });
 
-  // 1. Generate 52 weeks
-  const weeksData = useMemo(() => {
-    return Array.from({ length: 52 }, (_, i) => i + 1);
-  }, []);
+  const activeClubs = useMemo(
+    () => clubs.filter((club) => (club.isActive ?? club.is_active) === true),
+    [clubs],
+  );
 
-  // 2. Group by month
-  const monthGroups = useMemo(() => {
-    return [
-      { month: "JAN", idx: 0, weeks: [1, 2, 3, 4] },
-      { month: "FEB", idx: 1, weeks: [5, 6, 7, 8] },
-      { month: "MAR", idx: 2, weeks: [9, 10, 11, 12, 13] },
-      { month: "APR", idx: 3, weeks: [14, 15, 16, 17] },
-      { month: "MAY", idx: 4, weeks: [18, 19, 20, 21, 22] },
-      { month: "JUN", idx: 5, weeks: [23, 24, 25, 26] },
-      { month: "JUL", idx: 6, weeks: [27, 28, 29, 30] },
-      { month: "AUG", idx: 7, weeks: [31, 32, 33, 34, 35] },
-      { month: "SEP", idx: 8, weeks: [36, 37, 38, 39] },
-      { month: "OCT", idx: 9, weeks: [40, 41, 42, 43] },
-      { month: "NOV", idx: 10, weeks: [44, 45, 46, 47, 48] },
-      { month: "DEC", idx: 11, weeks: [49, 50, 51, 52] },
-    ];
-  }, []);
+  const regions = useMemo(
+    () =>
+      Array.from(
+        new Set(activeClubs.map((club) => club.region).filter(Boolean)),
+      ).sort(),
+    [activeClubs],
+  );
 
-  // 3. Build task rows - SAFE MODE & MIGRATION READY
-  const rows = useMemo(() => {
-    const rowsMap = new Map<string, any>();
+  const range = useMemo(() => {
+    const date = filters.date ? new Date(filters.date) : anchorDate;
+    return getRange(viewMode, date);
+  }, [anchorDate, filters.date, viewMode]);
 
-    // Init from templates
-    (templates || []).forEach((t) => {
-      const freq = (t.frequency || t.recurrence || "monthly").toLowerCase();
+  const instances = useMemo(
+    () =>
+      buildPeriodicInstancesForRange({
+        templates,
+        clubs,
+        history,
+        workflowCards: faults,
+        rangeStart: range.start,
+        rangeEnd: range.end,
+      }),
+    [clubs, faults, history, range.end, range.start, templates],
+  );
 
-      // Fallback variables just in case
-      const legacyMonthData = t.month || {};
+  const getInstanceClub = (instance: PeriodicInstance) =>
+    activeClubs.find((club) => club.id === instance.clubId);
 
-      rowsMap.set(t.id, {
-        id: t.id,
-        name: t.name || t.title,
-        frequency: freq,
-        occurrences: t.occurrences || [], // Backwards compatible with real occurrences
-        legacyMonthData, // keep task.month data safe
+  const getInstanceAssigneeId = (instance: PeriodicInstance) =>
+    instance.assigneeId || getInstanceClub(instance)?.coordinator_id;
+
+  const assignedUserIds = useMemo(() => {
+    const ids = new Set<string>();
+
+    templates.forEach((template) => {
+      const explicitAssignee =
+        template.assigned_to ||
+        template.assignedTo?.id ||
+        template.defaultResponsibleId;
+      if (explicitAssignee) ids.add(explicitAssignee);
+
+      const targetClubIds =
+        template.targetMode === "ALL_CLUBS"
+          ? activeClubs.map((club) => club.id)
+          : template.targetMode === "REGIONS"
+            ? activeClubs
+                .filter((club) => template.targetRegions?.includes(club.region || ""))
+                .map((club) => club.id)
+            : template.targetClubIds || [];
+
+      targetClubIds.forEach((clubId) => {
+        const coordinatorId = activeClubs.find((club) => club.id === clubId)?.coordinator_id;
+        if (coordinatorId) ids.add(coordinatorId);
       });
     });
 
-    // Populate planned items & Overlay legacy month data visually
-    rowsMap.forEach((row) => {
-      if (!row.occurrences || row.occurrences.length === 0) {
-        // SIMULATE WEEK DATA (TEMP): map month -> 4 weeks
-        monthGroups.forEach((mg) => {
-          // check if legacy month has value
-          const monthHasValue = row.legacyMonthData[mg.month] || false;
-
-          mg.weeks.forEach((wk, i) => {
-            // First week of the month gets the "action" if monthly, the rest are planned or empty
-            if (i === 0 && monthHasValue) {
-              row.occurrences.push({
-                week: wk,
-                status: "completed",
-                done: true,
-              });
-            } else {
-              row.occurrences.push({
-                week: wk,
-                status: "planned",
-                done: false,
-              });
-            }
-          });
-        });
-      }
+    instances.forEach((instance) => {
+      const assigneeId = getInstanceAssigneeId(instance);
+      if (assigneeId) ids.add(assigneeId);
     });
 
-    // Overlay history (Real Data overriding simulation)
-    (history || []).forEach((h) => {
-      const d = new Date(h.scheduledDate || h.completedAt);
-      if (getYear(d) === currentYear) {
-        const w = getWeek(d, { weekStartsOn: 1 });
-        if (!rowsMap.has(h.templateId)) {
-          rowsMap.set(h.templateId, {
-            id: h.templateId,
-            name: h.templateTitle,
-            frequency: "unknown",
-            occurrences: [],
-          });
+    return ids;
+  }, [activeClubs, instances, templates]);
+
+  const assignedUsers = useMemo(
+    () =>
+      users
+        .filter((user) => user.is_active !== false && assignedUserIds.has(user.id))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [assignedUserIds],
+  );
+
+  const filteredInstances = useMemo(
+    () =>
+      instances.filter((instance) => {
+        const club = getInstanceClub(instance);
+        const assigneeId = getInstanceAssigneeId(instance);
+
+        if (filters.region && club?.region !== filters.region) {
+          return false;
         }
-
-        const row = rowsMap.get(h.templateId);
-        const existing = row.occurrences.find((o: any) => o.week === w);
-        const status =
-          h.status === "COMPLETED"
-            ? "completed"
-            : h.status === "OVERDUE"
-              ? "overdue"
-              : "scheduled";
-
-        if (existing) {
-          existing.status = status;
-          existing.done = h.status === "COMPLETED";
-          existing.id = h.generatedTaskId || h.id;
-        } else {
-          row.occurrences.push({
-            week: w,
-            status,
-            done: h.status === "COMPLETED",
-            id: h.generatedTaskId || h.id,
-          });
+        if (filters.assigneeId && assigneeId !== filters.assigneeId) {
+          return false;
         }
-      }
-    });
-
-    // Overlay faults (live)
-    (faults || []).forEach((f) => {
-      const isPeriodic = f.source === "PERIODIC" || f.periodic?.isPeriodic;
-      if (!isPeriodic) return;
-
-      const d = new Date(f.due_date || f.created_at);
-      if (getYear(d) === currentYear) {
-        const w = getWeek(d, { weekStartsOn: 1 });
-        const tId = f.template_id || f.periodic?.templateId;
-        if (tId) {
-          if (!rowsMap.has(tId)) {
-            rowsMap.set(tId, {
-              id: tId,
-              name: f.title,
-              frequency: "unknown",
-              occurrences: [],
-            });
-          }
-
-          const row = rowsMap.get(tId);
-          // Prioritize completed OVER overdue, scheduled
-          const existingIndex = row.occurrences.findIndex(
-            (o: any) => o.week === w,
-          );
-          const newStatus =
-            normalizeWorkflowStatusId(f.status) === Status.FIXED
-              ? "completed"
-              : normalizeWorkflowStatusId(f.status) === Status.REJECTED
-                ? "overdue"
-                : "scheduled";
-
-          const newItem = {
-            week: w,
-            status: newStatus,
-            done: newStatus === "completed",
-            id: f.id,
-          };
-
-          if (existingIndex >= 0) {
-            const existing = row.occurrences[existingIndex];
-            if (existing.status === "planned" || newStatus === "completed") {
-              row.occurrences[existingIndex] = newItem;
-            }
-          } else {
-            row.occurrences.push(newItem);
-          }
+        if (filters.clubId && instance.clubId !== filters.clubId) {
+          return false;
         }
-      }
-    });
+        return isWithinInterval(new Date(instance.dueDate || instance.dueAt), range);
+      }),
+    [filters, instances, range, activeClubs],
+  );
 
-    return Array.from(rowsMap.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
-  }, [templates, history, faults, weeksData, currentYear]);
+  const kpis = useMemo(() => {
+    const assigned = filteredInstances.filter((item) => item.status !== "REJECTED").length;
+    const completed = filteredInstances.filter((item) => item.status === "COMPLETED").length;
+    const overdue = filteredInstances.filter((item) => item.status === "OVERDUE").length;
+    const completedOnTime = filteredInstances.filter(
+      (item) =>
+        item.status === "COMPLETED" &&
+        Boolean(item.completedAt) &&
+        item.completedAt! <= (item.dueDate || item.dueAt),
+    ).length;
 
-  const renderStatus = (cell: any, isCurrentWeek: boolean) => {
-    if (!cell) {
-      return (
-        <div className="w-full h-full min-h-[36px] flex flex-col items-center justify-center border-r border-slate-100 last:border-0 opacity-50" />
-      );
-    }
+    return { assigned, completed, overdue, completedOnTime };
+  }, [filteredInstances]);
 
-    return (
-      <div
-        onClick={() => {
-          if (cell.id && onOpenCard) onOpenCard(cell.id);
-        }}
-        className={cn(
-          "w-full h-full min-h-[36px] flex flex-col items-center justify-center border-r border-slate-100 last:border-0",
-          cell.id ? "cursor-pointer hover:bg-slate-100" : "",
-        )}
-      >
-        <div
-          className={cn(
-            "w-6 h-6 rounded-md flex items-center justify-center transition-all",
-            cell.id && "hover:scale-110 active:scale-95 shadow-sm",
-          )}
-        >
-          {cell.done ? (
-            <Check size={14} className="text-emerald-500 font-bold" />
-          ) : cell.status === "planned" ? (
-            <Circle size={10} className="text-slate-300" />
-          ) : (
-            <X size={14} className="text-red-500 font-bold" />
-          )}
-        </div>
-      </div>
-    );
-  };
+  const selectedTemplate = selectedInstance
+    ? templates.find((template) => template.id === selectedInstance.templateId)
+    : undefined;
+  const selectedTemplateHistory = selectedInstance
+    ? history
+        .filter((record) => record.templateId === selectedInstance.templateId)
+        .sort(
+          (a, b) =>
+            new Date(b.scheduledDate || 0).getTime() -
+            new Date(a.scheduledDate || 0).getTime(),
+        )
+    : [];
+
+  const workflowName = (workflowTypeId?: string) =>
+    workflowTypes.find((workflow) => workflow.id === workflowTypeId)?.name ||
+    workflowTypeId ||
+    "-";
+
+  const clubName = (clubId?: string) =>
+    activeClubs.find((club) => club.id === clubId)?.name || clubId || "-";
+
+  const visibleClubs = useMemo(
+    () =>
+      activeClubs.filter(
+        (club) => !filters.region || club.region === filters.region,
+      ),
+    [activeClubs, filters.region],
+  );
+
+  const periodLabel = `${format(range.start, "yyyy-MM-dd")} - ${format(range.end, "yyyy-MM-dd")}`;
 
   return (
-    <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full min-h-[600px]">
-      <div className="flex justify-between items-end mb-6 shrink-0">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-            Peržiūra: Savaitinis ({currentYear})
-          </h2>
-          <p className="text-slate-500 font-medium text-sm mt-1">
-            S1..S52 periodinių darbų tvarkaraštis
-          </p>
-        </div>
-        <div className="flex gap-4 text-xs font-bold text-slate-600">
-          <div className="flex items-center gap-1.5">
-            <Check size={14} className="text-emerald-500" /> Atlikta
-          </div>
-          <div className="flex items-center gap-1.5">
-            <X size={14} className="text-red-500" /> Praleista
-          </div>
-          <div className="flex items-center gap-1.5">
-            <AlertCircle size={14} className="text-amber-500" /> Aktyvi
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Circle size={10} className="text-slate-300" /> Planuojama
-          </div>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto flex-1 rounded-2xl border border-slate-200 bg-slate-50 shadow-inner">
-        <div className="min-w-max">
-          {/* Header: Months */}
-          <div className="flex items-stretch bg-slate-100 border-b border-slate-200 sticky top-0 z-20">
-            <div className="w-64 shrink-0 border-r border-slate-200 p-3 flex items-center bg-slate-100 sticky left-0 z-30">
-              <span className="font-bold text-slate-500 uppercase text-xs tracking-widest">
-                Užduotis
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: "Priskirta", value: kpis.assigned, icon: CalendarDays },
+          { label: "Atlikta", value: kpis.completed, icon: CheckCircle2 },
+          { label: "Vėluoja", value: kpis.overdue, icon: Clock },
+          { label: "Atlikta laiku", value: kpis.completedOnTime, icon: CheckCircle2 },
+        ].map((item) => (
+          <div key={item.label} className="bg-white border border-slate-200 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                {item.label}
               </span>
+              <item.icon size={18} className="text-slate-400" />
             </div>
-            <div className="flex flex-1">
-              {monthGroups.map((mg, i) => (
-                <div
-                  key={i}
-                  className="border-r border-slate-200 last:border-0"
-                  style={{ width: `${mg.weeks.length * 36}px` }}
-                >
-                  <div className="text-center py-2 text-xs font-black uppercase text-slate-700 tracking-widest border-b border-slate-200 bg-slate-200/50">
-                    {mg.month}
-                  </div>
-                  <div className="flex h-8">
-                    {mg.weeks.map((wd) => {
-                      const isCurrent = wd === currentWeekNum;
-                      return (
-                        <div
-                          key={wd}
-                          className={cn(
-                            "flex-1 border-r border-slate-200 last:border-0 text-[9px] font-bold text-center flex items-center justify-center",
-                            isCurrent
-                              ? "bg-amber-100 text-amber-800"
-                              : "text-slate-500",
-                          )}
-                        >
-                          S{wd}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="mt-2 text-3xl font-black text-slate-900">{item.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <h2 className="text-xl font-black text-slate-900">Periodiniai darbai</h2>
+            <p className="text-sm text-slate-500">{periodLabel}</p>
           </div>
 
-          {/* Body: Rows */}
-          <div className="bg-white relative">
-            {/* Current Week Highlight */}
-            <div
-              className="absolute top-0 bottom-0 pointer-events-none bg-amber-50/50 border-x border-amber-200/30 z-0"
-              style={{
-                left: `calc(16rem + ${(currentWeekNum - 1) * 36}px)`,
-                width: "36px",
-              }}
-            />
-
-            {rows.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 font-medium">
-                Nėra periodinių darbų
-              </div>
-            ) : (
-              rows.map((row) => (
-                <div
-                  key={row.id}
-                  className="flex border-b border-slate-100 hover:bg-slate-50/80 transition-colors relative z-10 group"
-                >
-                  <div className="w-64 shrink-0 border-r border-slate-200 p-3 bg-white group-hover:bg-slate-50/80 transition-colors sticky left-0 z-20 shadow-[1px_0_2px_rgba(0,0,0,0.05)] flex flex-col justify-center">
-                    <span className="font-bold text-sm text-slate-800 line-clamp-2 leading-tight">
-                      {row.name}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mt-1">
-                      {row.frequency}
-                    </span>
-                  </div>
-                  <div className="flex flex-1 items-stretch">
-                    {monthGroups.map((mg, i) => (
-                      <div
-                        key={i}
-                        className="flex border-r border-slate-200 last:border-0"
-                        style={{ width: `${mg.weeks.length * 36}px` }}
-                      >
-                        {mg.weeks.map((wd) => {
-                          const occ = row.occurrences.find(
-                            (o: any) => o.week === wd,
-                          );
-                          return (
-                            <div key={wd} className="flex-1 w-[36px]">
-                              {renderStatus(occ, wd === currentWeekNum)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(viewModeLabels) as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={cn(
+                  "px-3 py-2 rounded-md text-sm font-bold border transition-colors",
+                  viewMode === mode
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50",
+                )}
+              >
+                {viewModeLabels[mode]}
+              </button>
+            ))}
           </div>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <select
+            className="border border-slate-200 rounded-md px-3 py-2 text-sm"
+            value={filters.region}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                region: event.target.value,
+                clubId: "",
+              }))
+            }
+          >
+            <option value="">Regionas</option>
+            {regions.map((region) => (
+              <option key={region} value={region}>
+                {region}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="border border-slate-200 rounded-md px-3 py-2 text-sm"
+            value={filters.clubId}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, clubId: event.target.value }))
+            }
+          >
+            <option value="">Klubas</option>
+            {visibleClubs.map((club) => (
+              <option key={club.id} value={club.id}>
+                {club.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="border border-slate-200 rounded-md px-3 py-2 text-sm"
+            value={filters.assigneeId}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, assigneeId: event.target.value }))
+            }
+          >
+            <option value="">Atsakingas</option>
+            {assignedUsers.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="date"
+            className="border border-slate-200 rounded-md px-3 py-2 text-sm"
+            value={filters.date}
+            onChange={(event) => {
+              setFilters((current) => ({ ...current, date: event.target.value }));
+              if (event.target.value) setAnchorDate(new Date(event.target.value));
+            }}
+          />
+        </div>
       </div>
+
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="grid grid-cols-[1.3fr_1fr_1fr_140px_120px] gap-0 bg-slate-50 border-b border-slate-200 text-xs font-black uppercase tracking-wide text-slate-500">
+          <div className="p-3">Pavadinimas</div>
+          <div className="p-3">Klubas</div>
+          <div className="p-3">Atsakingas</div>
+          <div className="p-3">Terminas</div>
+          <div className="p-3">Statusas</div>
+        </div>
+
+        {filteredInstances.length === 0 ? (
+          <div className="p-8 text-center text-slate-500">Šiam laikotarpiui įrašų nėra</div>
+        ) : (
+          filteredInstances.map((instance) => (
+            <button
+              key={instance.id}
+              onClick={() => setSelectedInstance(instance)}
+              className="w-full grid grid-cols-[1.3fr_1fr_1fr_140px_120px] gap-0 border-b border-slate-100 last:border-0 text-left hover:bg-slate-50 transition-colors"
+            >
+              <div className="p-3">
+                <div className="font-bold text-slate-900">{instance.titleSnapshot}</div>
+                <div className="text-xs text-slate-500">{workflowName(instance.workflowTypeId)}</div>
+              </div>
+              <div className="p-3 text-sm text-slate-700">{clubName(instance.clubId)}</div>
+              <div className="p-3 text-sm text-slate-700">{getAssigneeName(getInstanceAssigneeId(instance))}</div>
+              <div className="p-3 text-sm font-semibold text-slate-700">
+                {formatDate(instance.dueDate || instance.dueAt)}
+              </div>
+              <div className="p-3">
+                <span
+                  className={cn(
+                    "inline-flex px-2 py-1 rounded text-xs font-black",
+                    statusClass[instance.status],
+                  )}
+                >
+                  {statusLabels[instance.status]}
+                </span>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+
+      {selectedInstance && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">
+                  {selectedInstance.titleSnapshot}
+                </h3>
+                <p className="text-sm text-slate-500">Periodinė užduotis</p>
+              </div>
+              <button
+                onClick={() => setSelectedInstance(null)}
+                className="p-2 rounded-md hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <Detail label="Šablonas" value={selectedTemplate?.name || selectedInstance.templateId} />
+              <Detail label="Workflow" value={workflowName(selectedInstance.workflowTypeId)} />
+              <Detail label="Klubas" value={clubName(selectedInstance.clubId)} />
+              <Detail label="Atsakingas" value={getAssigneeName(getInstanceAssigneeId(selectedInstance))} />
+              <Detail label="Terminas" value={formatDate(selectedInstance.dueDate || selectedInstance.dueAt)} />
+              <Detail label="Statusas" value={statusLabels[selectedInstance.status]} />
+              <Detail
+                label="Atlikimo informacija"
+                value={
+                  selectedInstance.completedAt
+                    ? `${formatDate(selectedInstance.completedAt)} · ${selectedInstance.completedBy || "-"}`
+                    : "-"
+                }
+              />
+              <div>
+                <div className="text-xs font-bold uppercase text-slate-500 mb-1">
+                  Kortelės nuoroda
+                </div>
+                {selectedInstance.workflowCardId && onOpenCard ? (
+                  <button
+                    onClick={() => onOpenCard(selectedInstance.workflowCardId!)}
+                    className="inline-flex items-center gap-2 text-sm font-bold text-blue-700 hover:text-blue-900"
+                  >
+                    Atidaryti kortelę <ExternalLink size={14} />
+                  </button>
+                ) : (
+                  <div className="font-semibold text-slate-900">-</div>
+                )}
+              </div>
+              {(() => {
+                const proofRequired = selectedInstance.requiresPhotoProof || selectedInstance.templateSnapshot?.proofRequired;
+                const rawPhotos: string[] = selectedInstance.photoProofIds?.length
+                  ? (() => { try { return JSON.parse(localStorage.getItem(`sg_photos_${selectedInstance.id}`) || "[]") as string[]; } catch { return []; } })()
+                  : [];
+                return (
+                  <div>
+                    <div className="text-xs font-bold uppercase text-slate-500 mb-1">Nuotraukos</div>
+                    {rawPhotos.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {rawPhotos.map((src, i) => (
+                          <button key={i} onClick={() => window.open(src, "_blank")} className="h-16 w-16 overflow-hidden rounded-lg border border-slate-200 hover:opacity-80">
+                            <img src={src} alt={`Nuotrauka ${i + 1}`} className="h-full w-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    ) : proofRequired ? (
+                      <div className="font-semibold text-amber-600">⚠ Foto įrodymas nebuvo įkeltas</div>
+                    ) : (
+                      <div className="font-semibold text-slate-900">-</div>
+                    )}
+                  </div>
+                );
+              })()}
+              <Detail
+                label="Komentarai"
+                value={
+                  selectedInstance.completionComment ||
+                  selectedInstance.history.find((event) => event.reason)?.reason ||
+                  (selectedInstance.requiresComment ? "Reikalingas komentaras" : "-")
+                }
+              />
+            </div>
+
+            <div className="px-5 pb-5">
+              <h4 className="text-sm font-black text-slate-900 mb-3">Istorija</h4>
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                {selectedTemplateHistory.length === 0 ? (
+                  <div className="p-4 text-sm text-slate-500">Istorijos įrašų nėra</div>
+                ) : (
+                  selectedTemplateHistory.map((record) => (
+                    <div
+                      key={record.id}
+                      className="grid grid-cols-[120px_1fr_120px] gap-3 p-3 border-b border-slate-100 last:border-0 text-sm"
+                    >
+                      <div className="font-bold text-slate-700">
+                        {format(new Date(record.scheduledDate), "yyyy-MM")}
+                      </div>
+                      <div className="text-slate-700">{record.clubName}</div>
+                      <div className="font-bold text-slate-900">{record.status}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+const Detail = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div>
+    <div className="text-xs font-bold uppercase text-slate-500 mb-1">{label}</div>
+    <div className="font-semibold text-slate-900">{value}</div>
+  </div>
+);

@@ -111,6 +111,12 @@ import {
   hydrateMockCollection,
   writeMockStorage,
 } from "./logic/mockDbHydration";
+import {
+  loadFromStorage,
+  saveToStorage,
+  clearStorage,
+  KEYS,
+} from "./services/persistenceService";
 import { addMedia, MEDIA_LIMITS } from "./logic/mediaLogic";
 import { compressAndResizeImage } from "./logic/imageProcessing";
 import {
@@ -237,7 +243,6 @@ import {
 import { OrderProvider } from "./modules/orders/OrderContext";
 import { OrderModule } from "./modules/orders/OrderModule";
 import { PeriodicTaskProvider } from "./modules/periodic-tasks/PeriodicTaskContext";
-import { PeriodicAdminModule } from "./modules/periodic/PeriodicAdminModule";
 import { PeriodicModule } from "./modules/periodic/PeriodicModule";
 import { ZmonesOrgModule } from "./modules/zmones-org/ZmonesOrgModule";
 import {
@@ -260,11 +265,9 @@ import {
 } from "./components/sidebar/sidebarLogic";
 import { getRuntimeModuleForPath } from "./modules/moduleRuntime";
 import { PeriodicDecisionBlock } from "./components/PeriodicDecisionBlock";
-import { generatePeriodicTasks } from "./logic/periodicGeneratorLogic";
 import { generatePeriodicWorksForClub } from "./logic/periodicWorkGenerator";
 import { mockPeriodicTemplates } from "./mock-db/periodicTemplates";
 import { mockPeriodicHistory } from "./mock-db/periodicHistory";
-import { migrateExcelToPeriodic } from "./logic/periodicExcelMigration";
 
 import { suppliersList } from "./mock-db/suppliers";
 import {
@@ -277,11 +280,18 @@ import {
   suppliersList as MOCK_SUPPLIERS,
   printMaterials,
 } from "./mock-db/admin";
-import { getLegacyIssueTypes } from "./mock-db/assetIssueTypes";
 import {
+  getIssueTypesForAssetType,
+  getLegacyIssueTypes,
+  type AssetIssueType,
+} from "./mock-db/assetIssueTypes";
+import {
+  getAssetObjectsForAssetType,
   getEquipmentAssetObjects,
   getFacilityAssetObjects,
+  type AssetObject,
 } from "./mock-db/assetObjects";
+import { assetTypes } from "./mock-db/assetTypes";
 import {
   initialFacilityInsights,
   initialEquipmentInsights,
@@ -932,7 +942,7 @@ const FaultDetailPanel = ({
     onUpdate(updates);
 
     // Create audit log entry for significant changes
-    const significantFields = ['status', 'title', 'assigneeId', 'description', 'priority', 'closedAt'];
+    const significantFields = ['status', 'title', 'assigneeId', 'description', 'priority', 'closedAt', 'archivedAt', 'archiveReason'];
     const changedFields = Object.keys(updates).filter(key => significantFields.includes(key));
 
     if (changedFields.length > 0) {
@@ -969,6 +979,31 @@ const FaultDetailPanel = ({
       setWatchMode(fault, userId, mode);
     }
     handleUpdate({ watchers: [...fault.watchers] });
+  };
+
+  const handleArchiveCard = () => {
+    if (!fault || fault.archivedAt) return;
+    const input = window.prompt("Archyvavimo priežastis");
+    if (input === null) return;
+    const reason = input.trim() || "Nenurodyta";
+    const now = Date.now();
+
+    handleUpdate({
+      archivedAt: now,
+      archivedBy: currentUser.name,
+      archiveReason: reason,
+      history: [
+        {
+          id: generateUniqueId("h"),
+          timestamp: now,
+          user: currentUser.name,
+          actionType: "ARCHIVED",
+          reason,
+        },
+        ...(fault.history || []),
+      ],
+    });
+    onClose();
   };
 
   const processFiles = async (files: File[]) => {
@@ -1117,14 +1152,14 @@ const FaultDetailPanel = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-slate-900/40 z-[60]"
+            className="fixed inset-x-0 top-16 bottom-0 bg-slate-900/40 z-[60]"
           />
           <motion.div
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 h-full w-full max-w-xl bg-white shadow-2xl z-[70] flex flex-col overflow-hidden"
+            className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-full max-w-xl bg-white shadow-2xl z-[70] flex flex-col overflow-hidden"
           >
             {/* Panel Header - Clean & Compact */}
             <div className="px-5 py-3 border-b border-slate-100 bg-white sticky top-0 z-50">
@@ -1325,6 +1360,7 @@ const FaultDetailPanel = ({
                 <div className="flex items-center gap-2 shrink-0 pt-0.5">
                   <div className="flex items-center gap-1 mr-2 border-r border-slate-100 pr-2">
                     {canCreateRelatedWorkflowCard &&
+                      fault.source !== "PERIODIC" &&
                       fault.status !== Status.MOVED &&
                       fault.status !== Status.SOMEDAY && (
                         <button
@@ -1335,6 +1371,15 @@ const FaultDetailPanel = ({
                           <ArrowRight size={12} /> Inicijuoti projektą
                         </button>
                       )}
+                    {!fault.archivedAt && (
+                      <button
+                        onClick={handleArchiveCard}
+                        className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-700 transition-colors"
+                        title="Archyvuoti"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                     {canCloseWorkflowCard &&
                       fault.status !== Status.REJECTED && (
                         <button
@@ -3620,7 +3665,13 @@ function MainApp() {
   const [isAdminExpanded, setIsAdminExpanded] = useState(true);
   const [isPeriodicExpanded, setIsPeriodicExpanded] = useState(true);
   const [activePeriodicTab, setActivePeriodicTab] = useState<
-    "calendar" | "templates" | "analytics" | "history"
+    | "calendar"
+    | "latest"
+    | "history"
+    | "worklist"
+    | "templates"
+    | "analytics"
+    | "dashboard"
   >("calendar");
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [periodicFilter, setPeriodicFilter] = useState<
@@ -3704,8 +3755,9 @@ function MainApp() {
     return () => window.removeEventListener("popstate", checkRoute);
   }, []);
 
-  const [workflowTypes, setWorkflowTypes] =
-    useState<WorkflowType[]>(initialWorkflowTypes);
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>(() =>
+    loadFromStorage(KEYS.WORKFLOW_TYPES, initialWorkflowTypes),
+  );
 
   const updateWorkflowTypes = (
     updater: React.SetStateAction<WorkflowType[]>,
@@ -3716,6 +3768,10 @@ function MainApp() {
       return normalizeWorkflowStatusConfig(next, previous);
     });
   };
+
+  useEffect(() => {
+    saveToStorage(KEYS.WORKFLOW_TYPES, workflowTypes);
+  }, [workflowTypes]);
 
   const [faults, setFaults] = useState<Fault[]>(() => {
     return applyWorkflowMigration(
@@ -3739,7 +3795,14 @@ function MainApp() {
   useEffect(() => {
     writeMockStorage("app_tasks", tasks);
   }, [tasks]);
-  const [orders, setOrders] = useState(MOCK_ORDERS);
+  const [orders, setOrders] = useState(() =>
+    loadFromStorage(KEYS.ORDERS, MOCK_ORDERS),
+  );
+
+  useEffect(() => {
+    saveToStorage(KEYS.ORDERS, orders);
+  }, [orders]);
+
   const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS);
   const [inventorySettings, setInventorySettings] = useState<
     ClubInventorySetting[]
@@ -3768,18 +3831,15 @@ function MainApp() {
   const [appEquipmentList, setAppEquipmentList] =
     useState<any[]>(equipmentList);
 
-  // Migration logic
-  const migratedData = useMemo(() => migrateExcelToPeriodic(), []);
-
-  const [appPeriodicTemplates, setAppPeriodicTemplates] = useState<any[]>(
-    () => {
-      const combined = [...mockPeriodicTemplates];
-      migratedData.templates.forEach((t) => {
-        if (!combined.find((x) => x.id === t.id)) combined.push(t);
-      });
-      return combined;
-    },
+  const [appPeriodicTemplates, setAppPeriodicTemplates] = useState<any[]>(() =>
+    hydrateMockCollection("app_periodic_templates", mockPeriodicTemplates as any, {
+      mergeSeed: true,
+    }),
   );
+
+  useEffect(() => {
+    writeMockStorage("app_periodic_templates", appPeriodicTemplates);
+  }, [appPeriodicTemplates]);
 
   const [clubTaskConfigs, setClubTaskConfigs] = useState<any[]>([]);
 
@@ -3819,60 +3879,14 @@ function MainApp() {
     });
   }, [appClubs, appPeriodicTemplates]);
 
-  const [periodicHistory, setPeriodicHistory] = useState<any[]>(() => {
-    const combined = [...mockPeriodicHistory];
-    migratedData.history.forEach((h) => {
-      if (!combined.find((x) => x.id === h.id)) combined.push(h);
-    });
-    return combined;
-  });
+  const [periodicHistory, setPeriodicHistory] = useState<any[]>(() =>
+    loadFromStorage(KEYS.PERIODIC_HISTORY, [...mockPeriodicHistory]),
+  );
 
-  // FORCE GENERATE FOR TESTING ONCE
-  const [forcedGenerated, setForcedGenerated] = useState(false);
   useEffect(() => {
-    if (forcedGenerated && clubTaskConfigs.length === 0) return;
+    saveToStorage(KEYS.PERIODIC_HISTORY, periodicHistory);
+  }, [periodicHistory]);
 
-    let effectiveTemplates = appPeriodicTemplates;
-
-    if (clubTaskConfigs.length > 0) {
-      // Re-map templates based on club configs, only using APPROVED
-      const approvedConfigs = clubTaskConfigs.filter(
-        (c) => c.status === "APPROVED",
-      );
-      effectiveTemplates = approvedConfigs.map((c) => ({
-        id: c.template_id,
-        name: c.name,
-        title: c.name,
-        description: c.description,
-        frequency: c.frequency,
-        type: "MANDATORY",
-        targetMode: "SELECTED_CLUBS",
-        targetClubIds: [c.club_id],
-        isActive: true,
-      }));
-    }
-
-    const generated = generatePeriodicTasks(
-      effectiveTemplates,
-      appClubs,
-      appUsers,
-      faults,
-      periodicHistory,
-      new Date(),
-    );
-    console.log("App forced periodic generation:", generated);
-    if (generated.length > 0) {
-      // Only add to faults[] — NOT to tasks[] — to prevent duplicate IDs across both arrays
-      setFaults((prev) => {
-        const existingIds = new Set(prev.map((f) => f.id));
-        const newOnes = generated.filter(
-          (g) => !existingIds.has(g.id),
-        ) as Fault[];
-        return [...newOnes, ...prev];
-      });
-      setForcedGenerated(true);
-    }
-  }, [clubTaskConfigs, appPeriodicTemplates]);
 
   const [showQrReport, setShowQrReport] = useState(false);
   const [qrParams, setQrParams] = useState<{
@@ -3921,9 +3935,8 @@ function MainApp() {
   const [clubFilter, setClubFilter] = useState<string[]>([]);
   const [slaFilter, setSlaFilter] = useState("visi");
   const [sourceFilter, setSourceFilter] = useState<"ALL" | "QR">("ALL");
-  const [quickFilter, setQuickFilter] = useState<"all" | "delayed" | "near">(
-    "all",
-  );
+  const [quickFilter, setQuickFilter] =
+    useState<"all" | "delayed" | "near" | "archive">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
   const [selectedWorkflowTypeIds, setSelectedWorkflowTypeIds] = useState<
     string[]
@@ -4192,21 +4205,75 @@ function MainApp() {
       null,
     [workflowTypes, regForm.workflowTypeId],
   );
+  const getRegistrationAssetType = React.useCallback(
+    (workflow?: Pick<WorkflowType, "assetTypeId"> | null) =>
+      workflow?.assetTypeId
+        ? assetTypes.find((assetType) => assetType.id === workflow.assetTypeId)
+        : undefined,
+    [],
+  );
+  const isWorkflowAssetBacked = React.useCallback(
+    (workflow?: Pick<WorkflowType, "assetTypeId"> | null) => {
+      const assetType = getRegistrationAssetType(workflow);
+      return Boolean(
+        workflow?.assetTypeId &&
+          assetType &&
+          (assetType.usesAssets || assetType.usesIssueTypes),
+      );
+    },
+    [getRegistrationAssetType],
+  );
+  const selectedRegistrationAssetType = React.useMemo(
+    () => getRegistrationAssetType(selectedRegistrationWorkflow),
+    [getRegistrationAssetType, selectedRegistrationWorkflow],
+  );
+  const selectedRegistrationAssetTypeId =
+    selectedRegistrationAssetType?.id || null;
   const registrationObjectType: WorkflowObjectType =
     selectedRegistrationWorkflow?.objectType || "GENERIC";
   const isEquipmentRegistration = registrationObjectType === "EQUIPMENT";
   const isFacilityRegistration = registrationObjectType === "FACILITY";
   const isOrderRegistration = registrationObjectType === "ORDER";
   const isGenericRegistration = registrationObjectType === "GENERIC";
-  const isAssetRegistration =
-    isEquipmentRegistration || isFacilityRegistration;
+  const isAssetRegistration = isWorkflowAssetBacked(selectedRegistrationWorkflow);
+
+  const selectedAssetObject = React.useMemo<AssetObject | null>(() => {
+    if (!isAssetRegistration || !regForm.equipmentId) return null;
+    return (
+      getAssetObjectsForAssetType(selectedRegistrationAssetTypeId || "").find(
+        (object) => object.id === regForm.equipmentId,
+      ) || null
+    );
+  }, [isAssetRegistration, regForm.equipmentId, selectedRegistrationAssetTypeId]);
+
+  const selectedAssetObjectLegacyId = React.useMemo(() => {
+    const legacyId = selectedAssetObject?.metadata?.legacyId;
+    return typeof legacyId === "string" ? legacyId : selectedAssetObject?.id;
+  }, [selectedAssetObject]);
+
+  const selectedAssetIssueType = React.useMemo<AssetIssueType | null>(() => {
+    if (!isAssetRegistration || !selectedRegistrationAssetTypeId) return null;
+    return (
+      getIssueTypesForAssetType(selectedRegistrationAssetTypeId).find(
+        (issueType) => issueType.id === regForm.typeId,
+      ) || null
+    );
+  }, [isAssetRegistration, regForm.typeId, selectedRegistrationAssetTypeId]);
 
   const currentAdminTemplate = React.useMemo(() => {
+    if (selectedAssetIssueType) {
+      return {
+        id: selectedAssetIssueType.id,
+        name: selectedAssetIssueType.name,
+        priority: selectedAssetIssueType.priority,
+        sla_hours: selectedAssetIssueType.slaHours,
+      };
+    }
     if (isAssetRegistration) {
       return equipmentIssueTypesList.find((i) => i.id === regForm.typeId);
     }
     return null;
-  }, [isAssetRegistration, regForm.typeId]);
+  }, [isAssetRegistration, regForm.typeId, selectedAssetIssueType]);
 
   const currentSLA = React.useMemo(() => {
     if (regForm.typeId === "other") {
@@ -4215,6 +4282,7 @@ function MainApp() {
       if (regForm.impact === "Trukdo") return 72;
       return 168;
     }
+    if (selectedAssetIssueType) return selectedAssetIssueType.slaHours;
     const issueType = equipmentIssueTypesList.find(
       (i) => i.id === regForm.typeId,
     );
@@ -4222,15 +4290,18 @@ function MainApp() {
 
     if (isFacilityRegistration) {
       const template = facilityRegistrationObjects.find(
-        (t) => t.id === regForm.equipmentId,
+        (t) => t.id === selectedAssetObjectLegacyId,
       );
       if (template) return template.sla_hours;
     }
 
     return getFaultMeta(regForm.typeId)?.sla || 72;
-  }, [regForm, currentAdminTemplate, isFacilityRegistration]);
+  }, [regForm, currentAdminTemplate, isFacilityRegistration, selectedAssetIssueType]);
 
   const displayedIssueTypes = React.useMemo(() => {
+    if (isAssetRegistration && selectedRegistrationAssetTypeId) {
+      return getIssueTypesForAssetType(selectedRegistrationAssetTypeId);
+    }
     if (isFacilityRegistration) {
       return equipmentIssueTypesList.filter(
         (t) =>
@@ -4247,9 +4318,44 @@ function MainApp() {
       );
     }
     return faultTypes;
-  }, [isEquipmentRegistration, isFacilityRegistration]);
+  }, [
+    isAssetRegistration,
+    selectedRegistrationAssetTypeId,
+    isEquipmentRegistration,
+    isFacilityRegistration,
+  ]);
 
   const displayedEquipmentOptions = React.useMemo(() => {
+    if (isAssetRegistration && selectedRegistrationAssetTypeId) {
+      const query = equipmentSearchQuery.toLowerCase();
+      const options = getAssetObjectsForAssetType(
+        selectedRegistrationAssetTypeId,
+      )
+        .filter(
+          (object) =>
+            !object.clubId ||
+            object.clubId === regForm.clubId ||
+            object.metadata?.legacySource === "facilityTemplates",
+        )
+        .filter(
+          (object) =>
+            object.name.toLowerCase().includes(query) ||
+            object.code.toLowerCase().includes(query),
+        );
+
+      if (isEquipmentRegistration) {
+        options.push({
+          id: "other",
+          assetTypeId: selectedRegistrationAssetTypeId,
+          code: "",
+          name: "+ Kitas (ne sąraše)",
+          active: true,
+          clubId: regForm.clubId,
+        });
+      }
+
+      return options;
+    }
     if (isFacilityRegistration) {
       return facilityRegistrationObjects.filter(
         (t) => t.club_id === null || t.club_id === regForm.clubId,
@@ -4274,6 +4380,8 @@ function MainApp() {
   }, [
     isEquipmentRegistration,
     isFacilityRegistration,
+    isAssetRegistration,
+    selectedRegistrationAssetTypeId,
     regForm.clubId,
     equipmentSearchQuery,
   ]);
@@ -4353,8 +4461,14 @@ function MainApp() {
   const [commentText, setCommentText] = useState("");
   const [rejectReason, setRejectReason] = useState("");
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
-  const [notifications, setNotifications] =
-    useState<AppNotification[]>(initialNotifications);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    loadFromStorage(KEYS.NOTIFICATIONS, initialNotifications),
+  );
+
+  useEffect(() => {
+    saveToStorage(KEYS.NOTIFICATIONS, notifications);
+  }, [notifications]);
+
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isConversionModalOpen, setIsConversionModalOpen] = useState(false);
@@ -4444,6 +4558,7 @@ function MainApp() {
       orders,
       club,
       currentUser.name,
+      { workflowTypes },
     );
 
     if (result.newFaults.length > 0 || result.newOrders.length > 0) {
@@ -4471,6 +4586,39 @@ function MainApp() {
       alert(
         `Nėra naujų užduočių generavimui (Iš viso: ${result.totalFound}, jau egzistuoja: ${result.skippedCount}).`,
       );
+    }
+  };
+
+  // Called after template create/update — generates WorkflowCards immediately
+  const handlePeriodicTemplatesChange = (updatedTemplates: any[]) => {
+    setAppPeriodicTemplates(updatedTemplates);
+
+    const toGenerate = updatedTemplates.filter(
+      (t) => t.isActive !== false && !t.archivedAt && t.destinationWorkflowTypeId,
+    );
+    if (!toGenerate.length) return;
+
+    const collectedFaults: Fault[] = [];
+    const collectedOrders: any[] = [];
+
+    appClubs.forEach((club) => {
+      const result = generatePeriodicWorksForClub(
+        toGenerate,
+        [...faults, ...tasks, ...collectedFaults],
+        [...orders, ...collectedOrders] as any[],
+        club,
+        currentUser.name,
+        { workflowTypes },
+      );
+      collectedFaults.push(...result.newFaults);
+      collectedOrders.push(...result.newOrders);
+    });
+
+    if (collectedFaults.length > 0) {
+      setFaults((prev) => [...collectedFaults, ...prev]);
+    }
+    if (collectedOrders.length > 0) {
+      setOrders((prev) => [...collectedOrders, ...prev]);
     }
   };
 
@@ -5068,15 +5216,15 @@ function MainApp() {
 
     const manualEquipmentId =
       isEquipmentRegistration && regForm.equipmentId !== "other"
-        ? regForm.equipmentId
+        ? selectedAssetObjectLegacyId
         : undefined;
     const existingEquipmentFault = findActiveEquipmentFault(
       faults,
       manualEquipmentId,
     );
     const manualFacilityAssetObjectId =
-      isFacilityRegistration && regForm.equipmentId
-        ? getFacilityAssetObjectIdFromLegacy(regForm.equipmentId)
+      isFacilityRegistration && selectedAssetObject
+        ? selectedAssetObject.id
         : undefined;
     const existingFacilityFault = findActiveFacilityFault(
       faults,
@@ -5155,59 +5303,34 @@ function MainApp() {
       else if (regForm.impact === "Netrukdo") finalSla = 168;
 
       finalPriority = regForm.priority;
-    } else {
-      if (isFacilityRegistration) {
-        let objectName = "Nenurodyta patalpa";
-        const template = facilityRegistrationObjects.find(
-          (t) => t.id === regForm.equipmentId,
-        );
-        if (template) objectName = template.name;
+    } else if (isAssetRegistration) {
+      let objectName = "Nenurodytas objektas";
+      if (regForm.equipmentId === "other") {
+        objectName = regForm.customEquipmentName || "Kitas objektas";
+      } else if (selectedAssetObject) {
+        objectName = selectedAssetObject.name;
+      }
 
-        const issue = equipmentIssueTypesList.find(
-          (i) => i.id === regForm.typeId,
-        );
-        if (issue) {
-          finalTitle = objectName;
-          finalSla = issue.sla_hours;
-          finalPriority = issue.priority as Priority;
-        } else {
-          finalTitle = objectName;
-          if (template) {
-            finalSla = template.sla_hours;
-            finalPriority = template.priority as Priority;
-          } else {
-            finalSla = 72;
-            finalPriority = "medium";
-          }
-        }
+      finalTitle = objectName;
+      if (selectedAssetIssueType) {
+        finalSla = selectedAssetIssueType.slaHours;
+        finalPriority = selectedAssetIssueType.priority as Priority;
+      } else if (currentAdminTemplate) {
+        finalSla = currentAdminTemplate.sla_hours;
+        finalPriority = currentAdminTemplate.priority as Priority;
       } else if (isEquipmentRegistration) {
-        let eqName = "Nenurodytas treniruoklis";
-        if (regForm.equipmentId === "other") {
-          eqName = regForm.customEquipmentName || "Kitas treniruoklis";
-        } else if (regForm.equipmentId) {
-          const eq = equipmentList.find((e) => e.id === regForm.equipmentId);
-          eqName = eq ? `${eq.name} #${eq.number}` : eqName;
-        }
-
-        const issue = equipmentIssueTypesList.find(
-          (i) => i.id === regForm.typeId,
-        );
-        if (issue) {
-          finalTitle = eqName;
-          finalSla = issue.sla_hours;
-          finalPriority = issue.priority as Priority;
-        } else {
-          finalTitle = eqName;
-          finalSla = 72;
-          finalPriority = "medium";
-        }
+        finalSla = 72;
+        finalPriority = "medium";
       } else {
-        const meta = getFaultMeta(regForm.typeId);
-        if (meta) {
-          finalTitle = meta.name;
-          finalSla = meta.sla;
-          finalPriority = meta.priority as Priority;
-        }
+        finalSla = 72;
+        finalPriority = "medium";
+      }
+    } else {
+      const meta = getFaultMeta(regForm.typeId);
+      if (meta) {
+        finalTitle = meta.name;
+        finalSla = meta.sla;
+        finalPriority = meta.priority as Priority;
       }
     }
 
@@ -5217,9 +5340,14 @@ function MainApp() {
       ? "EXISTS"
       : "MISSING";
 
+    if (selectedAssetIssueType?.sopUrl) {
+      finalSopUrl = selectedAssetIssueType.sopUrl;
+      finalSopStatus = "EXISTS";
+    }
+
     if (isFacilityRegistration) {
       const template = facilityRegistrationObjects.find(
-        (t) => t.id === regForm.equipmentId,
+        (t) => t.id === selectedAssetObjectLegacyId,
       );
       if (template?.sop_url) {
         finalSopUrl = template.sop_url;
@@ -5229,7 +5357,7 @@ function MainApp() {
 
     const defaultAssignee = getDefaultAssigneeForClub(regForm.clubId);
     const selectedFacilityObject = isFacilityRegistration
-      ? facilityRegistrationObjects.find((t) => t.id === regForm.equipmentId)
+      ? facilityRegistrationObjects.find((t) => t.id === selectedAssetObjectLegacyId)
       : undefined;
 
     const newFault: Fault = {
@@ -5285,10 +5413,14 @@ function MainApp() {
       workflowTypeId: workflowTypeIdForCreate,
       region: club?.city,
       typeId: regForm.typeId, // Legacy mapping
+      assetObjectId:
+        regForm.equipmentId !== "other"
+          ? selectedAssetObject?.id
+          : undefined,
       ...getEquipmentIdentityFields(
         isEquipmentRegistration &&
           regForm.equipmentId !== "other"
-          ? regForm.equipmentId
+          ? selectedAssetObjectLegacyId
           : undefined,
       ),
       customEquipmentName:
@@ -5297,13 +5429,10 @@ function MainApp() {
           ? regForm.customEquipmentName
           : undefined,
       ...getFacilityIdentityFields(
-        isFacilityRegistration ? regForm.equipmentId : undefined,
+        isFacilityRegistration ? selectedAssetObjectLegacyId : undefined,
         { isLocation: Boolean(selectedFacilityObject?.locationId) },
       ),
-      issue_type_id:
-        isEquipmentRegistration || isFacilityRegistration
-          ? regForm.typeId
-          : undefined,
+      issue_type_id: isAssetRegistration ? regForm.typeId : undefined,
     } as Fault & {
       region?: string;
       equipmentId?: string;
@@ -5492,6 +5621,43 @@ ${task.updatedBy}
     setTasks((prev) => prev.map(mapper));
 
     if (error) alert(error);
+  };
+
+  const handleRestoreArchivedCard = (id: string) => {
+    const now = Date.now();
+    const restoreMapper = (item: Fault): Fault => {
+      if (item.id !== id) return item;
+      return {
+        ...item,
+        status: Status.NEW,
+        archivedAt: undefined,
+        archivedBy: undefined,
+        archiveReason: undefined,
+        updatedAt: now,
+        updatedBy: currentUser.name,
+        history: [
+          {
+            id: generateUniqueId("h"),
+            timestamp: now,
+            user: currentUser.name,
+            actionType: "RESTORED_FROM_ARCHIVE",
+            reason: "Kortelė atstatyta iš archyvo",
+          },
+          ...(item.history || []),
+        ],
+      };
+    };
+
+    setFaults((prev) => prev.map(restoreMapper));
+    setTasks((prev) => prev.map(restoreMapper));
+    setSelectedFault((prev) =>
+      prev && prev.id === id ? restoreMapper(prev) : prev,
+    );
+    logAudit(
+      id,
+      "RESTORED_FROM_ARCHIVE",
+      "Kortelė atstatyta iš archyvo",
+    );
   };
 
   const handleRollback = (auditId: string) => {
@@ -5994,6 +6160,20 @@ ${task.updatedBy}
     [currentUser, visibleWorkflowTypes],
   );
   const canCreateVisibleWorkflow = creatableVisibleWorkflowTypes.length > 0;
+  const periodicModuleAccess = currentUser.effectivePermissionsPreview?.moduleAccess.find(
+    (access) => access.moduleId === "periodiniai",
+  );
+  const canViewPeriodicTasks = canAccessModule(currentUser, "periodiniai");
+  const canManagePeriodicTaskTemplates = Boolean(
+    periodicModuleAccess?.canEdit ||
+      periodicModuleAccess?.canAdmin,
+  );
+
+  useEffect(() => {
+    if (activeModule === "darbai" && activeTab === "periodiniai" && !canViewPeriodicTasks) {
+      setActiveTab("kanban" as any);
+    }
+  }, [activeModule, activeTab, canViewPeriodicTasks]);
 
   const openRegistrationHome = () => {
     if (!canCreateVisibleWorkflow) {
@@ -6114,6 +6294,78 @@ ${task.updatedBy}
       permittedWorkflowTypeIds,
     ],
   );
+
+  const archivedEntities = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+
+    return scopedEntities
+      .filter((item) => {
+        if (item.isDeleted || !item.archivedAt) return false;
+
+        const club = appClubs.find((c) => c.id === item.clubId);
+        const assignedToId = item.assigned_to || item.assigneeId;
+        const assignedToName =
+          typeof item.assignedTo === "object" && item.assignedTo
+            ? item.assignedTo.name
+            : item.assignedTo ||
+              item.assigneeName ||
+              (assignedToId
+                ? appUsers.find((user) => user.id === assignedToId)?.name
+                : null);
+
+        const matchesSearch =
+          !normalizedSearch ||
+          item.title.toLowerCase().includes(normalizedSearch) ||
+          (club?.name || "").toLowerCase().includes(normalizedSearch);
+        const matchesClub =
+          clubFilter.length === 0 || clubFilter.includes(item.clubId);
+        const matchesAssignee =
+          assigneeFilter === "ALL" ||
+          (assigneeFilter === "MINE" &&
+            (assignedToId === currentUser.id ||
+              assignedToName === currentUser.name)) ||
+          (assigneeFilter === "UNASSIGNED" &&
+            !assignedToId &&
+            !assignedToName) ||
+          assignedToId === assigneeFilter ||
+          assignedToName === assigneeFilter;
+        const matchesSource =
+          sourceFilter === "ALL" || item.source === sourceFilter;
+        const matchesWorkflowType =
+          selectedWorkflowTypeIds.length > 0
+            ? Boolean(
+                item.workflowTypeId &&
+                  selectedWorkflowTypeIds.includes(item.workflowTypeId) &&
+                  (!permittedWorkflowTypeIds ||
+                    permittedWorkflowTypeIds.includes(item.workflowTypeId)),
+              )
+            : !permittedWorkflowTypeIds ||
+              Boolean(
+                item.workflowTypeId &&
+                  permittedWorkflowTypeIds.includes(item.workflowTypeId),
+              );
+
+        return (
+          matchesSearch &&
+          matchesClub &&
+          matchesAssignee &&
+          matchesSource &&
+          matchesWorkflowType
+        );
+      })
+      .sort((a, b) => (b.archivedAt || 0) - (a.archivedAt || 0));
+  }, [
+    scopedEntities,
+    searchQuery,
+    appClubs,
+    appUsers,
+    clubFilter,
+    assigneeFilter,
+    currentUser,
+    sourceFilter,
+    selectedWorkflowTypeIds,
+    permittedWorkflowTypeIds,
+  ]);
 
   const canViewSomedayLane = canManagePeriodicTasks(currentUser);
   const activeWorkflowIds = useMemo(
@@ -6284,7 +6536,42 @@ ${task.updatedBy}
                 />
               )}
 
-              {activeModule === "darbai" && activeSubmodule && activeTab !== "kanban" && (
+              {activeModule === "darbai" &&
+                (activeTab === "kanban" || activeTab === "periodiniai") && (
+                  <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("kanban" as any)}
+                      className={cn(
+                        "h-7 rounded-lg px-3 text-xs font-black transition-all",
+                        activeTab === "periodiniai"
+                          ? "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                          : "bg-slate-900 text-white shadow-sm",
+                      )}
+                    >
+                      Darbai
+                    </button>
+                    {canViewPeriodicTasks && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("periodiniai" as any)}
+                        className={cn(
+                          "h-7 rounded-lg px-3 text-xs font-black transition-all",
+                          activeTab === "periodiniai"
+                            ? "bg-slate-900 text-white shadow-sm"
+                            : "text-slate-500 hover:bg-slate-50 hover:text-slate-800",
+                        )}
+                      >
+                        Periodiniai darbai
+                      </button>
+                    )}
+                  </div>
+                )}
+
+              {activeModule === "darbai" &&
+                activeSubmodule &&
+                activeTab !== "kanban" &&
+                activeTab !== "periodiniai" && (
                 <>
                   <div className="w-px h-6 bg-slate-200 mx-2 hidden lg:block" />
 
@@ -6533,7 +6820,25 @@ ${task.updatedBy}
               orders={orders}
               workflowTypes={workflowTypes}
               setWorkflowTypes={updateWorkflowTypes}
-              renderPeriodicModule={() => <PeriodicAdminModule />}
+              renderPeriodicModule={() => (
+                <PeriodicModule
+                  faults={[...faults, ...tasks]}
+                  history={periodicHistory}
+                  templates={appPeriodicTemplates}
+                  clubs={appClubs}
+                  activeTab={activePeriodicTab}
+                  onTabChange={setActivePeriodicTab}
+                  onTemplatesChange={handlePeriodicTemplatesChange}
+                  canManageTemplates={canManagePeriodicTaskTemplates}
+                  onOpenCard={(id) => {
+                    const task = [...faults, ...tasks].find((item) => item.id === id);
+                    if (task) {
+                      setSelectedFault(task);
+                      setIsDetailPanelOpen(true);
+                    }
+                  }}
+                />
+              )}
               onTabChange={navigateToAdminTab}
               activeTab={getAdminModuleTab(activeTab)}
               inventorySubTab={getAdminInventorySubTabForRouteTab(activeTab)}
@@ -6557,6 +6862,7 @@ ${task.updatedBy}
                             icon: AlertTriangle,
                           },
                           { id: "near", label: "<24h", icon: Clock },
+                          { id: "archive", label: "Archyvas", icon: History },
                         ] as const).map((qf) => (
                           <button
                             key={`qf-${qf.id}`}
@@ -6707,6 +7013,7 @@ ${task.updatedBy}
                           label: "Vėluojantys",
                           icon: AlertTriangle,
                         },
+                        { id: "archive", label: "Archyvas", icon: History },
                       ] as const).map((qf) => (
                         <button
                           key={`mob-qf-${qf.id}`}
@@ -6766,7 +7073,136 @@ ${task.updatedBy}
                   )}
                 >
                   <AnimatePresence mode="wait">
-                    {(activeTab === "kanban" || activeTab === "tasks") && (
+                    {activeTab === "kanban" && quickFilter === "archive" && (
+                      <motion.div
+                        key="workflow-archive"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden"
+                      >
+                        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+                          <div>
+                            <h2 className="text-sm font-black text-slate-900">
+                              Archyvas
+                            </h2>
+                            <p className="text-xs font-medium text-slate-500 mt-1">
+                              Archyvuotos workflow kortelės
+                            </p>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-[10px] font-black uppercase">
+                            {archivedEntities.length}
+                          </span>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-400">
+                              <tr>
+                                <th className="px-4 py-3 font-black">
+                                  Pavadinimas
+                                </th>
+                                <th className="px-4 py-3 font-black">
+                                  Workflow
+                                </th>
+                                <th className="px-4 py-3 font-black">
+                                  Klubas
+                                </th>
+                                <th className="px-4 py-3 font-black">
+                                  Archyvavo
+                                </th>
+                                <th className="px-4 py-3 font-black">Data</th>
+                                <th className="px-4 py-3 font-black">
+                                  Priežastis
+                                </th>
+                                <th className="px-4 py-3 font-black text-right">
+                                  Veiksmai
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {archivedEntities.length === 0 ? (
+                                <tr>
+                                  <td
+                                    colSpan={7}
+                                    className="px-4 py-10 text-center text-sm font-bold text-slate-400"
+                                  >
+                                    Archyve kortelių nėra
+                                  </td>
+                                </tr>
+                              ) : (
+                                archivedEntities.map((item) => {
+                                  const workflowName =
+                                    workflowTypes.find(
+                                      (workflow) =>
+                                        workflow.id === item.workflowTypeId,
+                                    )?.name || item.type;
+                                  const clubName =
+                                    appClubs.find(
+                                      (club) => club.id === item.clubId,
+                                    )?.name ||
+                                    item.clubName ||
+                                    "-";
+
+                                  return (
+                                    <tr
+                                      key={`archive-${item.id}`}
+                                      className="hover:bg-slate-50/70 transition-colors"
+                                    >
+                                      <td className="px-4 py-3">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setSelectedFault(item);
+                                            setIsDetailPanelOpen(true);
+                                          }}
+                                          className="font-bold text-slate-900 hover:text-brand-lime text-left"
+                                        >
+                                          {item.title}
+                                        </button>
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 font-medium">
+                                        {workflowName}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 font-medium">
+                                        {clubName}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 font-medium">
+                                        {item.archivedBy || "-"}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 font-medium whitespace-nowrap">
+                                        {item.archivedAt
+                                          ? new Date(
+                                              item.archivedAt,
+                                            ).toLocaleString("lt-LT")
+                                          : "-"}
+                                      </td>
+                                      <td className="px-4 py-3 text-slate-600 font-medium max-w-xs">
+                                        {item.archiveReason || "-"}
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleRestoreArchivedCard(item.id)
+                                          }
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:border-brand-lime hover:text-black transition-colors"
+                                        >
+                                          <RefreshCcw size={13} />
+                                          Atstatyti
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {(activeTab === "kanban" || activeTab === "tasks") && quickFilter !== "archive" && (
                       <DragDropContext
                         key={`board-${activeTab}`}
                         onDragEnd={onDragEnd}
@@ -6904,7 +7340,7 @@ ${task.updatedBy}
                       </DragDropContext>
                     )}
 
-                    {activeTab === "periodiniai" && (
+                    {activeTab === "periodiniai" && canViewPeriodicTasks && (
                       <PeriodicModule
                         faults={scopedTasks}
                         history={periodicHistory}
@@ -6912,6 +7348,8 @@ ${task.updatedBy}
                         clubs={appClubs}
                         activeTab={activePeriodicTab}
                         onTabChange={setActivePeriodicTab}
+                        onTemplatesChange={handlePeriodicTemplatesChange}
+                        canManageTemplates={canManagePeriodicTaskTemplates}
                         onOpenCard={(id) => {
                           const task = tasks.find((item) => item.id === id);
                           if (task) {
@@ -6986,7 +7424,25 @@ ${task.updatedBy}
                           orders={orders}
                           workflowTypes={workflowTypes}
                           setWorkflowTypes={updateWorkflowTypes}
-                          renderPeriodicModule={() => <PeriodicAdminModule />}
+                          renderPeriodicModule={() => (
+                            <PeriodicModule
+                              faults={[...faults, ...tasks]}
+                              history={periodicHistory}
+                              templates={appPeriodicTemplates}
+                              clubs={appClubs}
+                              activeTab={activePeriodicTab}
+                              onTabChange={setActivePeriodicTab}
+                              onTemplatesChange={handlePeriodicTemplatesChange}
+                              canManageTemplates={canManagePeriodicTaskTemplates}
+                              onOpenCard={(id) => {
+                                const task = [...faults, ...tasks].find((item) => item.id === id);
+                                if (task) {
+                                  setSelectedFault(task);
+                                  setIsDetailPanelOpen(true);
+                                }
+                              }}
+                            />
+                          )}
                           activeTab={getAdminModuleTab(activeTab)}
                           inventorySubTab={getAdminInventorySubTabForRouteTab(
                             activeTab,
@@ -7462,7 +7918,7 @@ ${task.updatedBy}
                 ...prev,
                 category: getRegistrationCompatibilityCategory(workflow),
                 workflowTypeId: workflow.id,
-                typeId: workflow.objectType === "GENERIC" ? "other" : prev.typeId,
+                typeId: isWorkflowAssetBacked(workflow) ? prev.typeId : "other",
               }));
 
               if (workflow.objectType !== "ORDER") {
@@ -8481,9 +8937,7 @@ ${task.updatedBy}
                       <div
                         className={cn(
                           "grid gap-4",
-                          isAssetRegistration
-                            ? "grid-cols-3"
-                            : "grid-cols-2",
+                          isAssetRegistration ? "grid-cols-3" : "grid-cols-1",
                         )}
                       >
                         <div className="space-y-1.5">
@@ -8539,9 +8993,8 @@ ${task.updatedBy}
                           <>
                             <div className="space-y-1.5 relative">
                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                {isEquipmentRegistration
-                                  ? "Treniruoklis"
-                                  : "Gedimas"}
+                                {selectedRegistrationAssetType?.name ||
+                                  "Objektas"}
                               </label>
                               <div
                                 className="relative"
@@ -8694,9 +9147,13 @@ ${task.updatedBy}
                                                   )}
                                                 >
                                                   {e.name}{" "}
-                                                  {e.number && (
+                                                  {((e as any).number ||
+                                                    (e as any).code) && (
                                                     <span className="text-xs text-slate-400">
-                                                      ({e.number})
+                                                      (
+                                                      {(e as any).number ||
+                                                        (e as any).code}
+                                                      )
                                                     </span>
                                                   )}
                                                 </button>
@@ -8742,7 +9199,12 @@ ${task.updatedBy}
                           </>
                         )}
 
-                        <div className="space-y-1.5 relative">
+                        <div
+                          className={cn(
+                            "space-y-1.5 relative",
+                            !isAssetRegistration && "hidden",
+                          )}
+                        >
                           <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                             {isAssetRegistration
                               ? "Gedimo tipas"
@@ -8883,10 +9345,9 @@ ${task.updatedBy}
                                   ? regForm.priority
                                   : currentAdminTemplate
                                     ? (currentAdminTemplate.priority as Priority)
-                                    : isEquipmentRegistration
-                                      ? "medium"
-                                      : getFaultMeta(regForm.typeId)
-                                          ?.priority || "medium"
+                                    : getFaultMeta(regForm.typeId)?.priority ||
+                                      regForm.priority ||
+                                      "medium"
                               }
                             />
                           </div>
@@ -9340,9 +9801,23 @@ ${task.updatedBy}
               {id:'u2',name:'Tomas (COORDINATOR)'},
               {id:'u3',name:'Admin (OPS)'},
               {id:'u5',name:'Super Admin (SUPER_ADMIN)'},
-              {id:'u6',name:'Buhalterija (ACCOUNTING)'}
+              {id:'u6',name:'Buhalterija (ACCOUNTING)'},
+              {id:'u8',name:'Administratorius (ADMIN)'},
+              {id:'u9',name:'CS Darbuotojas (CS)'}
             ].map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
+          <span style={{opacity:0.3}}>|</span>
+          <button
+            onClick={() => {
+              if (confirm('Visi duomenys bus ištrinti ir atstatyti į pradinę būseną. Tęsti?')) {
+                clearStorage();
+                window.location.reload();
+              }
+            }}
+            style={{background:'transparent',color:'#fca5a5',border:'1px solid #7f1d1d',borderRadius:4,padding:'2px 8px',fontSize:12,cursor:'pointer'}}
+          >
+            Atstatyti demo
+          </button>
         </div>
       )}
     </div>

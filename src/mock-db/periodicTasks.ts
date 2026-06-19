@@ -35,7 +35,9 @@ export type PeriodicTaskCategory =
   | "EQUIPMENT";
 
 /**
- * Template defining a periodic task.
+ * @deprecated Legacy compatibility only. New periodic architecture should use
+ * PeriodicTemplate from periodicTemplates.ts plus PeriodicInstance from
+ * periodicInstances.ts.
  */
 export interface PeriodicTaskTemplate {
   id: string;
@@ -85,7 +87,8 @@ export interface PeriodicTaskTemplate {
 }
 
 /**
- * An instance of a periodic task scheduled for a specific date and club.
+ * @deprecated Legacy compatibility only. New periodic architecture should use
+ * PeriodicInstance from periodicInstances.ts.
  */
 export interface PeriodicTaskInstance {
   id: string;

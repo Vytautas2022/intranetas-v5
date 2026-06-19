@@ -193,7 +193,7 @@ export function handleQrReport(
       title = loc.name;
     }
   } else if (workflow.qrMode === "GENERIC") {
-    title = workflow.name || 'QR PraneÅ¡imas';
+    title = workflow.name || 'QR Pranešimas';
   }
 
   if (workflow.qrMode === "ASSET_BASED" && !clubId) {

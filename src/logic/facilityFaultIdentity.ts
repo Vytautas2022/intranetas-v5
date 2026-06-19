@@ -1,7 +1,7 @@
 import type { Fault } from "../mock-db/faults";
 import { Status } from "../types/faults";
 
-type FacilityIdentity = Pick<Fault, "assetObjectId" | "template_id" | "location_id">;
+type FacilityIdentity = Pick<Fault, "assetObjectId" | "equipment_id" | "location_id">;
 
 export const getFacilityAssetObjectIdFromLegacy = (
   facilityObjectId?: string,
@@ -11,19 +11,19 @@ export const getFaultFacilityAssetObjectId = (
   fault?: Partial<FacilityIdentity> | null,
 ): string =>
   fault?.assetObjectId ||
-  getFacilityAssetObjectIdFromLegacy(fault?.location_id || fault?.template_id);
+  getFacilityAssetObjectIdFromLegacy(fault?.location_id || fault?.equipment_id);
 
 export const getFacilityIdentityFields = (
   facilityObjectId?: string,
   options: { isLocation?: boolean } = {},
-): Pick<Fault, "assetObjectId" | "template_id" | "location_id"> | Record<string, never> => {
+): Pick<Fault, "assetObjectId" | "equipment_id" | "location_id"> | Record<string, never> => {
   if (!facilityObjectId) return {};
 
   return {
     assetObjectId: getFacilityAssetObjectIdFromLegacy(facilityObjectId),
     ...(options.isLocation
       ? { location_id: facilityObjectId }
-      : { template_id: facilityObjectId }),
+      : { equipment_id: facilityObjectId }),
   };
 };
 

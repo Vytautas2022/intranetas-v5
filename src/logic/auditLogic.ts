@@ -1,6 +1,7 @@
 import { AuditLogEntry, ActionType, auditLogs } from '../mock-db/auditLogs';
 import { currentUser } from '../mock-db/currentUser';
 import { createGlobalAuditEntry } from './auditEngine';
+import { writeMockStorage } from './mockDbHydration';
 
 export const createAuditLogEntry = (params: {
   moduleId: string;
@@ -24,6 +25,7 @@ export const createAuditLogEntry = (params: {
   });
 
   auditLogs.unshift(newEntry);
+  writeMockStorage('sg_audit_logs', auditLogs);
   return newEntry;
 };
 

@@ -1,3 +1,4 @@
+// SEED DATA FROZEN — DO NOT MODIFY (beta v1.0)
 export interface Club {
   id: string;
   name: string;

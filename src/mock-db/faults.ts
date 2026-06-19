@@ -92,12 +92,14 @@ export interface Fault {
   rejectReason: string;
   updatedBy: string;
   code: string;
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
   coverImage?: string;
   category?: string;
   typeId?: string;
   equipmentId?: string;
   assetObjectId?: string;
-  template_id?: string;
   issue_type_id?: string;
   converted_to_task_id?: string;
   converted_at?: number;
@@ -109,23 +111,17 @@ export interface Fault {
   source?: "USER" | "QR" | "PERIODIC";
   periodic_type?: "MANDATORY" | "OPTIONAL";
   region?: string;
-  due_date?: number | string;
   inspection_decision?: "NOT_CHECKED" | "OK_NO_ACTION" | "ACTION_NEEDED" | "EXECUTE" | "REJECT";
   rejection_comment?: string;
   task_description?: string;
   task_description_updated_at?: number;
   task_description_updated_by?: string;
-  periodic?: {
-    isPeriodic: boolean
-    templateId?: string
-    templateTitle?: string
-    taskType?: "MANDATORY" | "INSPECTION"
-    recurrenceLabel?: string
-    dueDate?: string | number
-    generatedFromTemplate?: boolean
-    inspectionDecision?: "NOT_CHECKED" | "OK_NO_ACTION" | "ACTION_NEEDED"
-    rescheduleCount?: number
-  };
+  // Flattened periodic fields (replaces nested periodic object and legacy template_id/due_date)
+  periodicInstanceId?: string;
+  periodicTemplateId?: string;
+  periodicType?: "MANDATORY" | "OPTIONAL" | "CRITICAL" | "IMPORTANT" | "STANDARD";
+  periodicDueDate?: number;
+  periodicInspectionDecision?: "OK_NO_ACTION" | "ACTION_NEEDED" | "EXECUTE" | "REJECT";
   checklists?: Checklist[];
 }
 

@@ -1,7 +1,11 @@
+export type AssetTypeMode = "ASSET_FAULTS" | "ORDERS";
+
 export interface AssetType {
   id: string;
   code: string;
   name: string;
+  description?: string;
+  mode: AssetTypeMode;
   active: boolean;
   usesQr: boolean;
   usesSla: boolean;
@@ -15,6 +19,7 @@ export const assetTypes: AssetType[] = [
     id: "asset-type-equipment",
     code: "EQUIPMENT",
     name: "Treniruokliai",
+    mode: "ASSET_FAULTS",
     active: true,
     usesQr: true,
     usesSla: true,
@@ -26,6 +31,7 @@ export const assetTypes: AssetType[] = [
     id: "asset-type-facility",
     code: "FACILITY",
     name: "Patalpos",
+    mode: "ASSET_FAULTS",
     active: true,
     usesQr: true,
     usesSla: true,
@@ -37,17 +43,7 @@ export const assetTypes: AssetType[] = [
     id: "asset-type-orders",
     code: "ORDERS",
     name: "Užsakymai",
-    active: true,
-    usesQr: false,
-    usesSla: false,
-    usesPriority: false,
-    usesIssueTypes: false,
-    usesAssets: false,
-  },
-  {
-    id: "asset-type-generic",
-    code: "GENERIC",
-    name: "Bendrinis",
+    mode: "ORDERS",
     active: true,
     usesQr: false,
     usesSla: false,

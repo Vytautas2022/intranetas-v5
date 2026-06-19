@@ -87,6 +87,61 @@ const KpiCard = ({ metric, onClick }: { metric: KpiMetric, onClick?: () => void 
   );
 };
 
+const formatEuro = (value: number) =>
+  new Intl.NumberFormat("lt-LT", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(value);
+
+const getOrderAmount = (order: any) => {
+  if (typeof order.actualCost === "number") return order.actualCost;
+  if (typeof order.estimatedBudget === "number") return order.estimatedBudget;
+
+  return (order.items || []).reduce(
+    (sum: number, item: any) =>
+      sum + (item.actualUnitPrice || item.unitPrice || 0) * (item.quantity || 0),
+    0,
+  );
+};
+
+const CfoKpiCard = ({
+  label,
+  value,
+  tone,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  tone: "income" | "critical" | "expense" | "cashflow";
+  icon: React.ElementType;
+}) => {
+  const toneClasses = {
+    income: "border-emerald-100 bg-emerald-50 text-emerald-700",
+    critical: "border-rose-100 bg-rose-50 text-rose-700",
+    expense: "border-amber-100 bg-amber-50 text-amber-700",
+    cashflow: "border-blue-100 bg-blue-50 text-blue-700",
+  };
+
+  return (
+    <div className="cfo-kpi rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <div className={cn("rounded-2xl border p-3", toneClasses[tone])}>
+          <Icon size={20} />
+        </div>
+      </div>
+      <div>
+        <p className="mb-1 text-3xl font-black leading-none text-slate-900">
+          {value}
+        </p>
+        <p className="text-[11px] font-black uppercase leading-none tracking-widest text-slate-400">
+          {label}
+        </p>
+      </div>
+    </div>
+  );
+};
+
 const SectionHeader = ({ title, subtitle, onAction }: { title: string, subtitle: string, onAction?: () => void }) => (
   <div className="flex items-center justify-between mb-6 px-4">
     <div>
@@ -145,6 +200,26 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
     const prev30d = last30d - (endDate - startDate);
     const last90d = now - (90 * 24 * 60 * 60 * 1000);
     const prev90d = last90d - (90 * 24 * 60 * 60 * 1000);
+
+    // --- CFO KPI ---
+    const periodOrders = (orders || []).filter(
+      (order) => order && order.requestedAt >= startDate && order.requestedAt <= endDate,
+    );
+    const receivedMoney = periodOrders
+      .filter(
+        (order) =>
+          order.category === "VENDING" &&
+          ["DELIVERED_TO_CLUB", "SENT_TO_ACCOUNTING", "CLOSED"].includes(order.status),
+      )
+      .reduce((sum, order) => sum + getOrderAmount(order), 0);
+    const criticalExpenses = periodOrders
+      .filter((order) => order.urgency === "critical" || order.urgency === "urgent")
+      .reduce((sum, order) => sum + getOrderAmount(order), 0);
+    const operatingExpenses = periodOrders
+      .filter((order) => order.urgency !== "critical" && order.urgency !== "urgent")
+      .reduce((sum, order) => sum + getOrderAmount(order), 0);
+    const normalizedCashFlow =
+      receivedMoney - criticalExpenses - operatingExpenses;
 
     // --- 1. FAULT ANALYTICS ---
     const faultsThisMonth = (faults || []).filter(f => f && f.createdAt >= last30d).length;
@@ -315,6 +390,12 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
         status: statusLabel,
         color: statusColor
       },
+      finance: {
+        receivedMoney,
+        criticalExpenses,
+        operatingExpenses,
+        normalizedCashFlow
+      },
       faults: {
         thisMonth: faultsThisMonth,
         lastMonth: faultsLastMonth,
@@ -352,7 +433,7 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
         declines: topDeclines
       }
     };
-  }, [faults, surveys, clubs, periodicTemplates, Status, timeRange, customDates]);
+  }, [faults, surveys, clubs, periodicTemplates, orders, Status, timeRange, customDates]);
 
   const kpis: KpiMetric[] = [
     { 
@@ -442,6 +523,33 @@ export const CeoDashboard: React.FC<CeoDashboardProps> = ({
       </div>
 
       {/* 1. KPI (TOP) */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <CfoKpiCard
+          label="Gauti pinigai"
+          value={formatEuro(stats.finance.receivedMoney)}
+          tone="income"
+          icon={TrendingUp}
+        />
+        <CfoKpiCard
+          label="Kritinės išlaidos"
+          value={formatEuro(stats.finance.criticalExpenses)}
+          tone="critical"
+          icon={AlertTriangle}
+        />
+        <CfoKpiCard
+          label="Veiklos išlaidos"
+          value={formatEuro(stats.finance.operatingExpenses)}
+          tone="expense"
+          icon={ShoppingCart}
+        />
+        <CfoKpiCard
+          label="Normalizuotas Cash Flow"
+          value={formatEuro(stats.finance.normalizedCashFlow)}
+          tone="cashflow"
+          icon={TrendingDown}
+        />
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
         {(kpis || []).map((kpi, idx) => (
           <KpiCard key={idx} metric={kpi} />

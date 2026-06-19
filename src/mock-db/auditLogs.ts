@@ -30,7 +30,7 @@ export interface AuditLogEntry {
   snapshotAfter?: any;
 }
 
-export const auditLogs: AuditLogEntry[] = [
+const _seedAuditLogs: AuditLogEntry[] = [
   {
     id: "a1",
     moduleId: "periodic",
@@ -53,3 +53,16 @@ export const auditLogs: AuditLogEntry[] = [
     snapshotAfter: { isActive: false }
   }
 ];
+
+const _loadPersistedAuditLogs = (): AuditLogEntry[] => {
+  if (typeof window === 'undefined') return _seedAuditLogs;
+  try {
+    const raw = localStorage.getItem('sg_audit_logs');
+    if (raw) return JSON.parse(raw) as AuditLogEntry[];
+  } catch {
+    // ignore corrupt data
+  }
+  return _seedAuditLogs;
+};
+
+export const auditLogs: AuditLogEntry[] = _loadPersistedAuditLogs();

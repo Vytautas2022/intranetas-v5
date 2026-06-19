@@ -153,7 +153,11 @@ export const moduleAccessPermissions: ModuleAccessPermission[] = [
   ...createModuleAccess("role-cs", {
     canView: true,
     canCreate: true,
-  }),
+  }).map((access) =>
+    access.moduleId === "periodiniai"
+      ? { ...access, canCreate: false }
+      : access,
+  ),
 ].map((access) => {
   if (
     restrictedAdminModuleIds.includes(access.moduleId) &&

@@ -1,7 +1,11 @@
 import { PeriodicTaskTemplate, PeriodicTaskInstance } from '../mock-db/periodicTasks';
 import { Club } from '../mock-db/clubs';
 import { format } from 'date-fns';
-import { cloneChecklistTemplatesForGeneratedCard } from './checklistLogic';
+import {
+  adaptPeriodicInstanceToPeriodicTaskInstance,
+  adaptPeriodicTaskTemplateToPeriodicTemplate,
+  createPeriodicInstanceFromTemplate,
+} from '../mock-db/periodicInstances';
 
 export const generatePeriodicKanbanCards = (
   templates: PeriodicTaskTemplate[],
@@ -20,22 +24,21 @@ export const generatePeriodicKanbanCards = (
           i => i.templateId === template.id && i.clubId === club.id && i.metadata?.periodKey === currentPeriodKey
         );
         if (!exists) {
+          const canonicalTemplate =
+            adaptPeriodicTaskTemplateToPeriodicTemplate(template);
+          const canonicalInstance = createPeriodicInstanceFromTemplate({
+            template: canonicalTemplate,
+            club,
+            dueAt: currentDate.getTime(),
+          });
+          const legacyInstance =
+            adaptPeriodicInstanceToPeriodicTaskInstance(canonicalInstance);
+
           newInstances.push({
+            ...legacyInstance,
             id: `periodic-${template.id}-${club.id}-${currentPeriodKey}`,
-            templateId: template.id,
-            sourceType: 'PERIODIC',
-            title: template.title,
-            description: template.description,
-            status: 'PENDING',
-            dueDate: currentDate.getTime(),
-            clubId: club.id,
             clubName: club.name,
-            comments: [],
-            history: [{ type: 'PERIODIC_INSTANCE_CREATED', user: 'system', date: Date.now(), meta: { templateId: template.id, clubId: club.id } }],
-            checklists: cloneChecklistTemplatesForGeneratedCard(template),
-            updatedAt: Date.now(),
-            updatedBy: 'system',
-            metadata: { periodKey: currentPeriodKey }
+            metadata: { periodKey: currentPeriodKey },
           });
         }
       });

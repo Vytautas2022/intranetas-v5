@@ -1,23 +1,30 @@
 import { Fault, Task } from '../types/faults';
 import { User } from '../mock-db/users';
 
+// After Fault.periodic was flattened, Fault uses flat periodicXxx fields + source==='PERIODIC'.
+// Task objects don't carry periodicXxx fields — only Fault does.
+const isPeriodic = (card: Fault | Task): boolean =>
+  (card as Fault).source === 'PERIODIC' || !!(card as any).periodicTemplateId;
+
+const getPeriodicDueDate = (card: Fault | Task): number | undefined =>
+  (card as Fault).periodicDueDate;
+
+const getInspectionDecision = (card: Fault | Task): string | undefined =>
+  (card as Fault).periodicInspectionDecision;
+
 export const reschedulePeriodicTask = (
   card: Fault | Task,
   newDate: number,
   reason: string,
   user: User
 ): Fault | Task => {
-  if (!card.periodic?.isPeriodic) return card;
+  if (!isPeriodic(card)) return card;
 
-  const oldDate = card.periodic.dueDate;
-  
+  const oldDate = getPeriodicDueDate(card);
+
   return {
     ...card,
-    periodic: {
-      ...card.periodic,
-      dueDate: newDate,
-      rescheduleCount: (card.periodic.rescheduleCount || 0) + 1,
-    },
+    periodicDueDate: newDate,
     history: [
       ...card.history,
       {
@@ -32,7 +39,7 @@ export const reschedulePeriodicTask = (
         }
       }
     ]
-  };
+  } as unknown as Fault | Task;
 };
 
 export const setInspectionDecision = (
@@ -41,14 +48,12 @@ export const setInspectionDecision = (
   reason: string | undefined,
   user: User
 ): Fault | Task => {
-  if (!card.periodic?.isPeriodic || card.periodic.taskType !== 'INSPECTION') return card;
+  if (!isPeriodic(card)) return card;
 
   return {
     ...card,
-    periodic: {
-      ...card.periodic,
-      inspectionDecision: decision,
-    },
+    periodicInspectionDecision: decision,
+    inspection_decision: decision,
     history: [
       ...card.history,
       {
@@ -62,17 +67,18 @@ export const setInspectionDecision = (
         }
       }
     ]
-  };
+  } as unknown as Fault | Task;
 };
 
 export const canClosePeriodicTask = (card: Fault | Task): { allowed: boolean; reason?: string } => {
-  if (!card.periodic?.isPeriodic) return { allowed: true };
+  if (!isPeriodic(card)) return { allowed: true };
 
-  // Inspection check
-  if (card.periodic.taskType === 'INSPECTION') {
-    if (!card.periodic.inspectionDecision || card.periodic.inspectionDecision === 'NOT_CHECKED') {
-      return { allowed: false, reason: 'Būtina priimti sprendimą dėl patikros.' };
-    }
+  const decision = getInspectionDecision(card);
+  const periodicType = (card as Fault).periodicType ?? (card as any).periodic_type;
+  const isInspection = periodicType === 'OPTIONAL';
+
+  if (isInspection && (!decision || decision === 'NOT_CHECKED')) {
+    return { allowed: false, reason: 'Būtina priimti sprendimą dėl patikros.' };
   }
 
   return { allowed: true };

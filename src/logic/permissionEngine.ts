@@ -113,5 +113,13 @@ export const canSeeSubmodule = (
 export const canManageAllClubs = (user: PermissionSubject): boolean =>
   canAccessPermission(user, "admin");
 
-export const canManagePeriodicTasks = (user: PermissionSubject): boolean =>
-  canAccessPermission(user, "periodiniai") || canAccessPermission(user, "darbai");
+export const canViewPeriodicTasks = (user: PermissionSubject): boolean =>
+  canAccessPermission(user, "periodiniai");
+
+export const canManagePeriodicTasks = (user: PermissionSubject): boolean => {
+  if (!user) return false;
+  const access = user.effectivePermissionsPreview?.moduleAccess.find(
+    (a) => a.moduleId === "periodiniai",
+  );
+  return Boolean(access?.canEdit || access?.canAdmin);
+};

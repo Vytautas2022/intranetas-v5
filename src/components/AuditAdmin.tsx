@@ -20,6 +20,105 @@ import { periodicTaskTemplates } from '../mock-db/periodicTasks';
 import { cn } from '../lib/utils';
 import { AuditLogEntry } from '../mock-db/auditLogs';
 
+type ImportAuditStatus = 'IMPORTED' | 'EMPTY' | 'PARSER_ERROR';
+
+type ImportAuditEntry = {
+  fileName: string;
+  bank: string;
+  totalRows: number;
+  newRows: number;
+  duplicateRows: number;
+  income: number;
+  expenses: number;
+  internalTransfers: number;
+  status: ImportAuditStatus;
+  reason?: string;
+};
+
+const importAuditEntries: ImportAuditEntry[] = [
+  {
+    fileName: 'SEB 2026 01.csv',
+    bank: 'SEB',
+    totalRows: 318,
+    newRows: 306,
+    duplicateRows: 12,
+    income: 42850.2,
+    expenses: 31940.74,
+    internalTransfers: 5400,
+    status: 'IMPORTED',
+  },
+  {
+    fileName: 'SEB 2026 02.csv',
+    bank: 'SEB',
+    totalRows: 284,
+    newRows: 279,
+    duplicateRows: 5,
+    income: 39122.45,
+    expenses: 28740.13,
+    internalTransfers: 3200,
+    status: 'IMPORTED',
+  },
+  {
+    fileName: 'Revolut 2026 03.csv',
+    bank: 'Revolut',
+    totalRows: 96,
+    newRows: 91,
+    duplicateRows: 5,
+    income: 12880,
+    expenses: 9430.5,
+    internalTransfers: 1250,
+    status: 'IMPORTED',
+  },
+  {
+    fileName: 'Swed 2026 01.csv',
+    bank: 'Swedbank',
+    totalRows: 0,
+    newRows: 0,
+    duplicateRows: 0,
+    income: 0,
+    expenses: 0,
+    internalTransfers: 0,
+    status: 'EMPTY',
+    reason: 'Neatpažintas parseris',
+  },
+  {
+    fileName: 'Swed 2026 02.csv',
+    bank: 'Swedbank',
+    totalRows: 0,
+    newRows: 0,
+    duplicateRows: 0,
+    income: 0,
+    expenses: 0,
+    internalTransfers: 0,
+    status: 'EMPTY',
+    reason: '0 validžių eilučių',
+  },
+  {
+    fileName: 'Swed 2026 03.csv',
+    bank: 'Swedbank',
+    totalRows: 0,
+    newRows: 0,
+    duplicateRows: 0,
+    income: 0,
+    expenses: 0,
+    internalTransfers: 0,
+    status: 'EMPTY',
+    reason: 'Nepalaikomas formatas',
+  },
+  {
+    fileName: 'Swed 2026 05.csv',
+    bank: 'Swedbank',
+    totalRows: 0,
+    newRows: 0,
+    duplicateRows: 0,
+    income: 0,
+    expenses: 0,
+    internalTransfers: 0,
+    status: 'EMPTY',
+    reason: '0 validžių eilučių',
+  },
+];
+
 export const AuditAdmin: React.FC = () => {
   const [filters, setFilters] = useState({
     moduleId: '',
@@ -92,6 +191,85 @@ export const AuditAdmin: React.FC = () => {
     }
   };
 
+  const formatMoney = (value: number) =>
+    new Intl.NumberFormat('lt-LT', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+
+  const bankSummary = useMemo(() => {
+    const summary = new Map<
+      string,
+      {
+        bank: string;
+        transactions: number;
+        income: number;
+        expenses: number;
+        internalTransfers: number;
+      }
+    >();
+
+    importAuditEntries.forEach((entry) => {
+      const current = summary.get(entry.bank) || {
+        bank: entry.bank,
+        transactions: 0,
+        income: 0,
+        expenses: 0,
+        internalTransfers: 0,
+      };
+
+      current.transactions += entry.newRows;
+      current.income += entry.income;
+      current.expenses += entry.expenses;
+      current.internalTransfers += entry.internalTransfers;
+      summary.set(entry.bank, current);
+    });
+
+    return Array.from(summary.values()).sort((a, b) =>
+      a.bank.localeCompare(b.bank),
+    );
+  }, []);
+
+  const swedbankEmptyFiles = useMemo(
+    () =>
+      importAuditEntries.filter(
+        (entry) => entry.bank === 'Swedbank' && entry.status === 'EMPTY',
+      ),
+    [],
+  );
+
+  const dataQuality = useMemo(() => {
+    const hasParserErrors = importAuditEntries.some(
+      (entry) => entry.status === 'PARSER_ERROR',
+    );
+    const hasEmptyFiles = importAuditEntries.some(
+      (entry) => entry.status === 'EMPTY',
+    );
+
+    if (hasParserErrors) {
+      return {
+        label: 'Yra parserio klaidų',
+        className: 'border-red-200 bg-red-50 text-red-700',
+      };
+    }
+    if (hasEmptyFiles) {
+      return {
+        label: 'Yra EMPTY failų',
+        className: 'border-amber-200 bg-amber-50 text-amber-700',
+      };
+    }
+    return {
+      label: 'Visi failai importuoti',
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    };
+  }, []);
+
+  const getImportStatusClass = (status: ImportAuditStatus) => {
+    if (status === 'IMPORTED') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'EMPTY') return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-red-50 text-red-700 border-red-200';
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -103,6 +281,190 @@ export const AuditAdmin: React.FC = () => {
           <p className="text-slate-500 text-sm font-medium">Sekite visus sistemos pakeitimus ir veiksmus</p>
         </div>
       </div>
+
+      <section className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
+              Duomenų auditas
+            </h3>
+            <p className="text-sm font-medium text-slate-500">
+              Bankinių importų kokybė, EMPTY failų priežastys ir bankų suvestinė
+            </p>
+          </div>
+          <div
+            className={cn(
+              'inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-black',
+              dataQuality.className,
+            )}
+          >
+            <span className="h-2.5 w-2.5 rounded-full bg-current" />
+            {dataQuality.label}
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h4 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+              Import Audit
+            </h4>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1100px] text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/70 border-b border-slate-200">
+                  {[
+                    'Failas',
+                    'Bankas',
+                    'Įrašų sk.',
+                    'Naujų įrašų sk.',
+                    'Dublių sk.',
+                    'Įplaukos €',
+                    'Išlaidos €',
+                    'Vidiniai pervedimai €',
+                    'Statusas',
+                  ].map((header) => (
+                    <th
+                      key={header}
+                      className="p-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"
+                    >
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {importAuditEntries.map((entry) => (
+                  <tr key={entry.fileName} className="hover:bg-slate-50/60">
+                    <td className="p-3 text-sm font-bold text-slate-900">
+                      {entry.fileName}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-slate-600">
+                      {entry.bank}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-slate-700">
+                      {entry.totalRows}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-slate-700">
+                      {entry.newRows}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-slate-700">
+                      {entry.duplicateRows}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-emerald-700">
+                      {formatMoney(entry.income)}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-red-600">
+                      {formatMoney(entry.expenses)}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-blue-700">
+                      {formatMoney(entry.internalTransfers)}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex flex-col gap-1">
+                        <span
+                          className={cn(
+                            'w-fit rounded-full border px-2 py-0.5 text-[10px] font-black uppercase',
+                            getImportStatusClass(entry.status),
+                          )}
+                        >
+                          {entry.status}
+                        </span>
+                        {entry.status === 'EMPTY' && entry.reason && (
+                          <span className="text-[11px] font-semibold text-slate-500">
+                            Priežastis: {entry.reason}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                Swedbank EMPTY auditas
+              </h4>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {swedbankEmptyFiles.map((entry) => (
+                <div
+                  key={entry.fileName}
+                  className="flex items-start justify-between gap-4 p-4"
+                >
+                  <div>
+                    <p className="text-sm font-black text-slate-900">
+                      {entry.fileName}
+                    </p>
+                    <p className="text-xs font-semibold text-slate-500">
+                      Kodėl EMPTY: {entry.reason}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">
+                    EMPTY
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h4 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                Bankų suvestinė
+              </h4>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/70 border-b border-slate-200">
+                    {[
+                      'Bankas',
+                      'Transakcijos',
+                      'Įplaukos',
+                      'Išlaidos',
+                      'Vidiniai pervedimai',
+                    ].map((header) => (
+                      <th
+                        key={header}
+                        className="p-3 text-[10px] font-black text-slate-400 uppercase tracking-widest"
+                      >
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {bankSummary.map((bank) => (
+                    <tr key={bank.bank} className="hover:bg-slate-50/60">
+                      <td className="p-3 text-sm font-black text-slate-900">
+                        {bank.bank}
+                      </td>
+                      <td className="p-3 text-sm font-bold text-slate-700">
+                        {bank.transactions}
+                      </td>
+                      <td className="p-3 text-sm font-bold text-emerald-700">
+                        {formatMoney(bank.income)}
+                      </td>
+                      <td className="p-3 text-sm font-bold text-red-600">
+                        {formatMoney(bank.expenses)}
+                      </td>
+                      <td className="p-3 text-sm font-bold text-blue-700">
+                        {formatMoney(bank.internalTransfers)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Filters */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">

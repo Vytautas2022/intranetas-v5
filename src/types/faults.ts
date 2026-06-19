@@ -31,6 +31,9 @@ export interface FaultHistoryItem {
 
 export interface Fault extends MockFault {
   isDeleted?: boolean;
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
   typeId?: string;
   orderData?: any;
   attachments?: any[];
@@ -62,12 +65,10 @@ export interface Fault extends MockFault {
   public_url?: string;
   assetObjectId?: string;
   
-  // New fields for periodic refactor
+  // New fields for periodic refactor (template_id/due_date removed; flat periodicXxx fields are in MockFault)
   source?: "USER" | "QR" | "PERIODIC";
   periodic_type?: "MANDATORY" | "OPTIONAL";
   region?: string;
-  template_id?: string;
-  due_date?: number | string;
   inspection_decision?: "NOT_CHECKED" | "OK_NO_ACTION" | "ACTION_NEEDED" | "EXECUTE" | "REJECT";
   rejection_comment?: string;
   task_description?: string;
@@ -113,17 +114,7 @@ export interface Task {
   attachments: any[];
   history: any[];
   typeId?: string; // For compatibility
-  periodic?: {
-    isPeriodic: boolean
-    templateId?: string
-    templateTitle?: string
-    taskType?: "MANDATORY" | "INSPECTION"
-    recurrenceLabel?: string
-    dueDate?: string | number
-    generatedFromTemplate?: boolean
-    inspectionDecision?: "NOT_CHECKED" | "OK_NO_ACTION" | "ACTION_NEEDED"
-    rescheduleCount?: number
-  };
+  // periodicXxx flat fields are inherited via the Fault base from mock-db/faults.ts
 }
 
 export interface Attachment {

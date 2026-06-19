@@ -1,144 +1,182 @@
-import React, { useState, useMemo } from 'react';
-import { Calendar, Settings, BarChart3, History } from 'lucide-react';
-import { motion } from 'motion/react';
-import { PeriodicCalendarView } from './PeriodicCalendarView';
-import { PeriodicTemplatesView } from './PeriodicTemplatesView';
-import { PeriodicAnalytics } from './PeriodicAnalytics';
-import { cn } from '../../lib/utils';
-import { PeriodicTemplate } from '../../mock-db/periodicTemplates';
-import { TemplateEditModal } from '../periodic-tasks/TemplateEditModal';
+import React, { useEffect, useState } from "react";
+import { Calendar, History, ListChecks, Plus } from "lucide-react";
+import { PeriodicCalendarView } from "./PeriodicCalendarView";
+import { PeriodicHistoryView } from "./PeriodicHistoryView";
+import { PeriodicLatestTasksView } from "./PeriodicLatestTasksView";
+import { cn } from "../../lib/utils";
+import { PeriodicTemplate } from "../../mock-db/periodicTemplates";
+import { TemplateEditModal } from "../periodic-tasks/TemplateEditModal";
+
+type VisiblePeriodicTab = "calendar" | "latest" | "history";
+type PeriodicTab =
+  | VisiblePeriodicTab
+  | "worklist"
+  | "templates"
+  | "analytics"
+  | "dashboard";
 
 interface PeriodicModuleProps {
   faults: any[];
   history: any[];
   templates: any[];
   clubs: any[];
-  activeTab?: 'calendar' | 'templates' | 'analytics' | 'history';
-  onTabChange?: (tab: 'calendar' | 'templates' | 'analytics' | 'history') => void;
+  activeTab?: PeriodicTab;
+  onTabChange?: (tab: PeriodicTab) => void;
   onOpenCard?: (id: string) => void;
+  canManageTemplates?: boolean;
+  onTemplatesChange?: (templates: any[]) => void;
 }
 
-export const PeriodicModule: React.FC<PeriodicModuleProps> = ({ 
-    faults, history, templates, clubs, activeTab: externalActiveTab, onTabChange, onOpenCard 
+
+export const PeriodicModule: React.FC<PeriodicModuleProps> = ({
+  faults,
+  history,
+  templates,
+  clubs,
+  activeTab: externalActiveTab,
+  onTabChange,
+  onOpenCard,
+  canManageTemplates = true,
+  onTemplatesChange,
 }) => {
-    const [internalActiveTab, setInternalActiveTab] = useState<'calendar' | 'templates' | 'analytics' | 'history'>('calendar');
-    const [editingTemplate, setEditingTemplate] = useState<PeriodicTemplate | null>(null);
-    const [localTemplates, setLocalTemplates] = useState(templates);
-    
-    // Controlled vs Uncontrolled
-    const activeTab = externalActiveTab || internalActiveTab;
-    const setActiveTab = onTabChange || setInternalActiveTab;
+  const [internalActiveTab, setInternalActiveTab] = useState<VisiblePeriodicTab>("calendar");
+  const [editingTemplate, setEditingTemplate] = useState<PeriodicTemplate | null>(null);
+  const [localTemplates, setLocalTemplates] = useState(templates);
 
-    const tabs = [
-        { id: 'calendar', label: 'Darbai', icon: Calendar },
-        { id: 'templates', label: 'Šablonai', icon: Settings },
-        { id: 'analytics', label: 'Analitika', icon: BarChart3 },
-        { id: 'history', label: 'Istorija', icon: History },
-    ] as const;
+  useEffect(() => {
+    setLocalTemplates(templates);
+  }, [templates]);
 
-    const handleCreateTemplate = () => {
-        const newId = `PT-${Math.floor(100 + Math.random() * 900)}`;
-        setEditingTemplate({
-            id: newId,
-            name: '',
-            title: '',
-            description: '',
-            frequency: 'monthly',
-            recurrence: 'monthly',
-            type: 'MANDATORY',
-            targetMode: 'ALL_CLUBS',
-            targetClubIds: [],
-            targetRegions: [],
-            isActive: true,
-            sopRequired: false,
-            budgetRequired: false,
-            decisionChecklist: [],
-            executionChecklist: [],
-            preferredSupplierIds: [],
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-        } as PeriodicTemplate);
-    };
+  const requestedActiveTab = externalActiveTab || internalActiveTab;
+  const activeTab: VisiblePeriodicTab =
+    requestedActiveTab === "latest" ||
+    requestedActiveTab === "history" ||
+    requestedActiveTab === "calendar"
+      ? requestedActiveTab
+      : "calendar";
+  const setActiveTab = onTabChange || setInternalActiveTab;
 
-    const handleSaveTemplate = (updatedTemplate: PeriodicTemplate) => {
-        if (localTemplates.some(t => t.id === updatedTemplate.id)) {
-            setLocalTemplates(localTemplates.map(t => t.id === updatedTemplate.id ? updatedTemplate : t));
-        } else {
-            setLocalTemplates([...localTemplates, updatedTemplate]);
-        }
-    };
-    
-    // (Part 3: Show a basic list IF templates is empty, in a controlled way)
-    if (activeTab === 'templates' && (!localTemplates || localTemplates.length === 0)) {
-        return <div style={{ padding: 20 }}>Nėra periodinių darbų</div>;
-    }
+  const tabs = [
+    { id: "calendar" as const, label: "Kalendorius", icon: Calendar },
+    { id: "latest" as const, label: "Naujausios užduotys", icon: ListChecks },
+    { id: "history" as const, label: "Istorija", icon: History },
+  ];
 
-    return (
-        <div className="space-y-6 bg-red-50 p-4 min-h-[300px]">
-            <div className="flex gap-2">
-                {tabs.map((tab) => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                            "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all",
-                            activeTab === tab.id
-                                ? "bg-slate-900 text-white"
-                                : "bg-white text-slate-600 hover:bg-slate-50 border border-slate-200"
-                        )}
-                    >
-                        <tab.icon size={16} /> {tab.label}
-                    </button>
-                ))}
-            </div>
+  const handleCreateTemplate = () => {
+    const newId = `PT-${Math.floor(100 + Math.random() * 900)}`;
+    setEditingTemplate({
+      id: newId,
+      name: "",
+      title: "",
+      description: "",
+      frequency: "monthly",
+      recurrence: "monthly",
+      type: "MANDATORY",
+      destinationType: "WORKFLOW_CARD",
+      assignmentStrategy: "MANUAL_UNASSIGNED",
+      assignmentSource: "MANUAL_UNASSIGNED",
+      visibleWeeksBeforeDue: 4,
+      requiresComment: false,
+      requiresPhotoProof: false,
+      isMandatory: true,
+      targetMode: "SELECTED_CLUBS",
+      targetClubIds: [],
+      targetRegions: [],
+      isActive: true,
+      sopRequired: false,
+      budgetRequired: false,
+      decisionChecklist: [],
+      executionChecklist: [],
+      preferredSupplierIds: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    } as PeriodicTemplate);
+  };
 
-            <div className="mt-6">
-                {activeTab === 'calendar' && <PeriodicCalendarView faults={faults} templates={localTemplates} history={history} clubs={clubs} onOpenCard={onOpenCard} />}
-                {activeTab === 'templates' && <PeriodicTemplatesView templates={localTemplates} onEditTemplate={setEditingTemplate} onCreateTemplate={handleCreateTemplate} />}
-                {activeTab === 'analytics' && <PeriodicAnalytics faults={faults} history={history} templates={localTemplates} clubs={clubs} />}
-                {activeTab === 'history' && (
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                        <h2 className="text-lg font-black text-slate-900 mb-6">Istorija</h2>
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="text-left text-slate-500 border-b border-slate-100">
-                                    <th className="pb-3 px-2">Data</th>
-                                    <th className="pb-3 px-2">Šablonas</th>
-                                    <th className="pb-3 px-2">Klubas</th>
-                                    <th className="pb-3 px-2">Statusas</th>
-                                    <th className="pb-3 px-2">Kaina</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {(history || []).map(h => (
-                                    <tr key={h.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                                        <td className="py-4 px-2">{new Date(h.scheduledDate || 0).toLocaleDateString('lt-LT')}</td>
-                                        <td className="py-4 px-2 font-semibold">{h.templateTitle}</td>
-                                        <td className="py-4 px-2 text-slate-600">{h.clubName}</td>
-                                        <td className="py-4 px-2">
-                                            <span className={cn("px-2 py-1 rounded text-[10px] font-bold uppercase", 
-                                                h.status === 'COMPLETED' ? "bg-emerald-100 text-emerald-800" :
-                                                h.status === 'OVERDUE' ? "bg-red-100 text-red-700" :
-                                                "bg-slate-100 text-slate-700"
-                                            )}>
-                                                {h.status}
-                                            </span>
-                                        </td>
-                                        <td className="py-4 px-2 font-bold">{h.actualCost || 0} €</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
-            {editingTemplate && (
-                <TemplateEditModal 
-                    template={editingTemplate} 
-                    onClose={() => setEditingTemplate(null)} 
-                    onSave={handleSaveTemplate}
-                />
-            )}
+  const handleSaveTemplate = (updatedTemplate: PeriodicTemplate) => {
+    const next = localTemplates.some((template) => template.id === updatedTemplate.id)
+      ? localTemplates.map((template) =>
+          template.id === updatedTemplate.id ? updatedTemplate : template,
+        )
+      : [...localTemplates, updatedTemplate];
+
+    setLocalTemplates(next);
+    onTemplatesChange?.(next);
+  };
+
+  return (
+    <div className="space-y-6 p-4 min-h-[300px] overflow-visible">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-md text-sm font-bold transition-all",
+                activeTab === tab.id
+                  ? "bg-slate-900 text-white"
+                  : "bg-white text-slate-600 hover:bg-slate-50 border border-slate-200",
+              )}
+            >
+              <tab.icon size={16} />
+              {tab.label}
+            </button>
+          ))}
         </div>
-    );
+
+        {canManageTemplates && (
+          <button
+            type="button"
+            onClick={handleCreateTemplate}
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-800 active:scale-95"
+          >
+            <Plus size={16} />
+            Nauja periodinė užduotis
+          </button>
+        )}
+      </div>
+
+      <div>
+        {activeTab === "calendar" && (
+          <PeriodicCalendarView
+            faults={faults}
+            templates={localTemplates}
+            history={history}
+            clubs={clubs}
+            onOpenCard={onOpenCard}
+          />
+        )}
+
+        {activeTab === "latest" && (
+          <PeriodicLatestTasksView
+            faults={faults}
+            templates={localTemplates}
+            history={history}
+            clubs={clubs}
+            onOpenCard={onOpenCard}
+          />
+        )}
+
+        {activeTab === "history" && (
+          <PeriodicHistoryView
+            history={history}
+            faults={faults}
+            templates={localTemplates}
+            clubs={clubs}
+            onOpenCard={onOpenCard}
+            onOpenTemplate={canManageTemplates ? setEditingTemplate : undefined}
+          />
+        )}
+      </div>
+
+      {editingTemplate && (
+        <TemplateEditModal
+          template={editingTemplate}
+          onClose={() => setEditingTemplate(null)}
+          onSave={handleSaveTemplate}
+        />
+      )}
+    </div>
+  );
 };

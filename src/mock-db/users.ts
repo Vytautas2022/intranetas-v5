@@ -1,3 +1,4 @@
+// SEED DATA FROZEN — DO NOT MODIFY (beta v1.0)
 import type { ModulePermission } from "../auth/types";
 
 export interface User {
@@ -22,5 +23,7 @@ export const users: User[] = [
   { id: "u3", name: "Admin User", email: "admin@fitsport.lt", role: "OPS", assignedRoleIds: ["role-ops"], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true },
   { id: "u5", name: "Super Admin", email: "superadmin@fitsport.lt", role: "SUPER_ADMIN", assignedRoleIds: ["role-super-admin"], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true },
   { id: "u7", name: "Vytautas", email: "vytautas@sportgates.lt", role: "SUPER_ADMIN", assignedRoleIds: ["role-super-admin"], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true },
-  { id: "u6", name: "Buhalterija", email: "accounting@fitsport.lt", role: "ACCOUNTING", assignedRoleIds: [], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true }
+  { id: "u6", name: "Buhalterija", email: "accounting@fitsport.lt", role: "ACCOUNTING", assignedRoleIds: [], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true },
+  { id: "u8", name: "Administratorius", email: "admin2@sportgates.lt", role: "ADMIN", assignedRoleIds: ["role-admin"], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true },
+  { id: "u9", name: "CS Darbuotojas", email: "cs@sportgates.lt", role: "CS", assignedRoleIds: ["role-cs"], assignedRegionIds: ["ALL"], assignedClubIds: ["ALL"], region: "ALL", is_active: true }
 ];

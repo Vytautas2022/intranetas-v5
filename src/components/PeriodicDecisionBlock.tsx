@@ -13,20 +13,17 @@ export const PeriodicDecisionBlock: React.FC<{
   onUpdate: (updates: Partial<Fault>) => void;
   currentUser: { id: string; name: string; role: string };
 }> = ({ fault, onUpdate, currentUser }) => {
-  if (!fault.periodic?.isPeriodic) return null;
+  if (fault.source !== 'PERIODIC') return null;
 
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [tempDescription, setTempDescription] = useState(fault.task_description || '');
 
-  const template = mockPeriodicTemplates.find(t => t.id === fault.periodic?.templateId);
+  const template = mockPeriodicTemplates.find(t => t.id === fault.periodicTemplateId);
 
   const handleDecision = (decision: "NOT_CHECKED" | "OK_NO_ACTION" | "ACTION_NEEDED" | "EXECUTE" | "REJECT") => {
     onUpdate({
       inspection_decision: decision,
-      periodic: {
-        ...fault.periodic!,
-        inspectionDecision: decision as any,
-      }
+      periodicInspectionDecision: decision as any,
     });
 
     if (decision === 'EXECUTE') {
@@ -41,7 +38,7 @@ export const PeriodicDecisionBlock: React.FC<{
       moduleName: 'Periodiniai darbai',
       entityType: 'PERIODIC_TASK',
       entityId: fault.id,
-      entityTitle: template?.name || template?.title || fault.periodic?.templateTitle || fault.id,
+      entityTitle: template?.name || template?.title || fault.id,
       actionType: 'UPDATED',
       fieldName: 'task_description',
       oldValue: fault.task_description,
@@ -76,7 +73,7 @@ export const PeriodicDecisionBlock: React.FC<{
   };
 
   const isOptional = fault.periodic_type === 'OPTIONAL';
-  const decision = fault.inspection_decision || fault.periodic?.inspectionDecision || 'NOT_CHECKED';
+  const decision = fault.inspection_decision || fault.periodicInspectionDecision || 'NOT_CHECKED';
 
   return (
     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 mt-4 space-y-4">
@@ -93,11 +90,11 @@ export const PeriodicDecisionBlock: React.FC<{
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-bold text-slate-900 leading-tight">{template?.name || template?.title || fault.periodic?.templateTitle}</p>
+        <p className="text-sm font-bold text-slate-900 leading-tight">{template?.name || template?.title || fault.title}</p>
         <div className="flex gap-2">
           <span className="px-2 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-600 flex items-center gap-1 shadow-sm">
             <Calendar size={10} />
-            Terminas: {fault.due_date ? new Date(fault.due_date).toLocaleDateString('lt-LT') : (fault.periodic?.dueDate ? new Date(fault.periodic.dueDate as any).toLocaleDateString('lt-LT') : '-')}
+            Terminas: {fault.periodicDueDate ? new Date(fault.periodicDueDate).toLocaleDateString('lt-LT') : '-'}
           </span>
         </div>
       </div>

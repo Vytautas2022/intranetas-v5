@@ -1,26 +1,8 @@
-import React, { useState, useEffect } from "react";
-import {
-  X,
-  CheckCircle2,
-  History,
-  AlertCircle,
-  Search as SearchIcon,
-  ChevronDown,
-} from "lucide-react";
-import { PeriodicTemplate } from "../../mock-db/periodicTemplates";
-import { users, User } from "../../mock-db/users";
-import { clubs, Club } from "../../mock-db/clubs";
-import { getLegacyEquipmentIssueTypes } from "../../mock-db/assetIssueTypes";
-import { getEquipmentAssetObjects } from "../../mock-db/assetObjects";
-import { RichTextEditor } from "../../components/ui/RichTextEditor";
-import { getAssignableUsersForClub } from "../../logic/userScopeLogic";
-import {
-  periodicTaskInstances,
-  PeriodicTaskInstance,
-} from "../../mock-db/periodicTasks";
-
-const equipmentIssueTypesList = getLegacyEquipmentIssueTypes();
-const equipmentList = getEquipmentAssetObjects();
+import React, { useMemo, useState } from "react";
+import { AlertCircle, ArrowDown, ArrowUp, Plus, Trash2, X } from "lucide-react";
+import { PeriodicChecklistItem, PeriodicCriticality, PeriodicTemplate } from "../../mock-db/periodicTemplates";
+import { clubs } from "../../mock-db/clubs";
+import { workflowTypes } from "../../mock-db/workflowTypes";
 
 interface TemplateEditModalProps {
   template: PeriodicTemplate;
@@ -28,636 +10,475 @@ interface TemplateEditModalProps {
   onSave: (template: PeriodicTemplate) => void;
 }
 
-const AssigneeDropdown = ({
-  users,
-  selectedUserId,
-  onSelect,
-  clubs,
-  selectedClubId,
-  error,
-}: {
-  users: User[];
-  selectedUserId: string;
-  onSelect: (userId: string) => void;
-  clubs: Club[];
-  selectedClubId: string;
-  error?: boolean;
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const wrapperRef = React.useRef<HTMLDivElement>(null);
+const activeClubs = clubs.filter((club) => club.is_active !== false);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        wrapperRef.current &&
-        !wrapperRef.current.contains(e.target as Node)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+const today = new Date().toISOString().split("T")[0];
 
-  const selectedClub = clubs.find((c) => c.id === selectedClubId);
-
-  const scopedUsers = selectedClub
-    ? getAssignableUsersForClub(users, selectedClub)
-    : users.filter((u) => u.is_active !== false);
-  const filteredUsers = scopedUsers.filter((u) =>
-    u.name.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
-
-  const selectedUser = users.find((u) => u.id === selectedUserId);
-
-  const groups = {
-    Kiti: filteredUsers,
-  };
-
-  return (
-    <div className="relative w-full" ref={wrapperRef}>
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full p-2 border bg-white rounded-lg text-sm text-left flex justify-between items-center ${error ? "border-red-500" : "border-slate-200"}`}
-      >
-        <span className={selectedUser ? "text-slate-900" : "text-slate-500"}>
-          {selectedUser ? selectedUser.name : "Pasirinkite atsakingą..."}
-        </span>
-        <ChevronDown size={14} className="text-slate-500" />
-      </button>
-
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2">
-          <div className="relative mb-2">
-            <SearchIcon
-              size={14}
-              className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-            <input
-              autoFocus
-              className="w-full pl-8 p-2 border border-slate-200 rounded text-sm focus:outline-none focus:border-slate-300"
-              placeholder="Ieškoti pagal vardą..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <div className="max-h-60 overflow-y-auto">
-            {Object.entries(groups).map(([groupName, groupUsers]) => {
-              if (groupUsers.length === 0) return null;
-              return (
-                <div key={groupName} className="mb-2">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1">
-                    {groupName}
-                  </div>
-                  {groupUsers.map((u) => (
-                    <div
-                      key={u.id}
-                      className="px-2 py-1.5 text-sm cursor-pointer hover:bg-slate-50 rounded"
-                      onClick={() => {
-                        onSelect(u.id);
-                        setIsOpen(false);
-                        setSearchTerm("");
-                      }}
-                    >
-                      {u.name}
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const getInitialClubIds = (template: PeriodicTemplate): string[] => {
+  if (template.targetMode === "ALL_CLUBS") {
+    return activeClubs.map((club) => club.id);
+  }
+  if (template.targetMode === "REGIONS") {
+    return activeClubs
+      .filter((club) => template.targetRegions?.includes(club.region || ""))
+      .map((club) => club.id);
+  }
+  return template.targetClubIds || [];
 };
+
+const genId = () => `ci-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 export const TemplateEditModal: React.FC<TemplateEditModalProps> = ({
   template,
   onClose,
   onSave,
 }) => {
-  const [formData, setFormData] = useState<PeriodicTemplate>({ ...template });
+  const [formData, setFormData] = useState<PeriodicTemplate>({
+    ...template,
+    targetMode: "SELECTED_CLUBS",
+    targetClubIds: getInitialClubIds(template),
+    description: template.description || "",
+    frequency: template.frequency || template.recurrence || "monthly",
+    recurrence: template.recurrence || template.frequency || "monthly",
+    destinationType: template.destinationType || "WORKFLOW_CARD",
+    visibleWeeksBeforeDue: template.visibleWeeksBeforeDue ?? 4,
+    requiresComment: Boolean(template.requiresComment),
+    requiresPhotoProof: Boolean(template.requiresPhotoProof || template.proofRequired),
+    isMandatory: template.isMandatory ?? template.type === "MANDATORY",
+    startDate: template.startDate || today,
+    customFrequencyValue: template.customFrequencyValue ?? 7,
+    customFrequencyUnit: template.customFrequencyUnit ?? "days",
+    criticality: template.criticality,
+    executionChecklistItems: template.executionChecklistItems ?? [],
+  });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Find last 3 history from instances
-  const history = periodicTaskInstances
-    .filter((i) => i.templateId === template.id && i.status === "COMPLETED")
-    .sort((a, b) => b.dueDate - a.dueDate)
-    .slice(0, 3);
+  const enabledWorkflows = useMemo(
+    () =>
+      workflowTypes
+        .filter((wf) => wf.enabled !== false && wf.active !== false)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [],
+  );
+
+  const isCustomFrequency = formData.frequency === "custom_frequency";
+
+  const toggleClub = (clubId: string) => {
+    setFormData((cur) => {
+      const sel = new Set(cur.targetClubIds || []);
+      if (sel.has(clubId)) sel.delete(clubId);
+      else sel.add(clubId);
+      return { ...cur, targetMode: "SELECTED_CLUBS", targetClubIds: Array.from(sel), targetRegions: [] };
+    });
+  };
+
+  // ── Checklist helpers ────────────────────────────────────────────────────
+
+  const checklist = formData.executionChecklistItems ?? [];
+
+  const addChecklistItem = () => {
+    if (checklist.length >= 5) return;
+    const item: PeriodicChecklistItem = {
+      id: genId(),
+      order: checklist.length + 1,
+      text: "",
+      required: true,
+    };
+    setFormData((cur) => ({
+      ...cur,
+      executionChecklistItems: [...(cur.executionChecklistItems ?? []), item],
+    }));
+  };
+
+  const removeChecklistItem = (id: string) => {
+    setFormData((cur) => {
+      const next = (cur.executionChecklistItems ?? [])
+        .filter((i) => i.id !== id)
+        .map((i, idx) => ({ ...i, order: idx + 1 }));
+      return { ...cur, executionChecklistItems: next };
+    });
+  };
+
+  const updateChecklistItem = (id: string, patch: Partial<PeriodicChecklistItem>) => {
+    setFormData((cur) => ({
+      ...cur,
+      executionChecklistItems: (cur.executionChecklistItems ?? []).map((i) =>
+        i.id === id ? { ...i, ...patch } : i,
+      ),
+    }));
+  };
+
+  const moveChecklistItem = (id: string, dir: -1 | 1) => {
+    setFormData((cur) => {
+      const items = [...(cur.executionChecklistItems ?? [])];
+      const idx = items.findIndex((i) => i.id === id);
+      const target = idx + dir;
+      if (target < 0 || target >= items.length) return cur;
+      [items[idx], items[target]] = [items[target], items[idx]];
+      return { ...cur, executionChecklistItems: items.map((i, n) => ({ ...i, order: n + 1 })) };
+    });
+  };
+
+  // ── Validation ───────────────────────────────────────────────────────────
 
   const validate = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.name && !formData.title)
-      newErrors.name = "Pavadinimas privalomas";
-    if (!formData.id) newErrors.id = "Užduoties ID privalomas";
-    if (!formData.assignedTo && !formData.assigned_to)
-      newErrors.assignee = "Atsakingas asmuo privalomas";
-    if (!formData.targetClubIds || formData.targetClubIds.length === 0) {
-      newErrors.clubs = "Pasirinkite klubą";
+    const e: Record<string, string> = {};
+    if (!formData.destinationWorkflowTypeId) e.workflow = "Workflow privalomas";
+    if (!(formData.name || formData.title)?.trim()) e.name = "Pavadinimas privalomas";
+    if (!formData.targetClubIds?.length) e.clubs = "Pasirinkite bent vieną padalinį";
+    if (!formData.frequency) e.frequency = "Periodiškumas privalomas";
+    if (isCustomFrequency && (!formData.customFrequencyValue || formData.customFrequencyValue < 1)) {
+      e.customFreq = "Įveskite teigiamą skaičių";
     }
-    if (!formData.frequency) newErrors.frequency = "Periodiškumas privalomas";
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
   const handleSave = () => {
-    if (validate()) {
-      onSave(formData);
-      onClose();
-    }
-  };
+    if (!validate()) return;
 
-  const selectedUser = formData.assignedTo;
-  const selectedClubId = formData.targetClubIds?.[0] || "";
-  const selectedClub = clubs.find((c) => c.id === selectedClubId);
+    const selectedWorkflow = workflowTypes.find((wf) => wf.id === formData.destinationWorkflowTypeId);
+
+    onSave({
+      ...formData,
+      name: formData.name || formData.title || "",
+      title: formData.name || formData.title || "",
+      description: formData.description || "",
+      frequency: formData.frequency,
+      recurrence: formData.frequency,
+      destinationType: selectedWorkflow?.action === "order" ? "ORDER" : "WORKFLOW_CARD",
+      targetMode: "SELECTED_CLUBS",
+      targetRegions: [],
+      visibleWeeksBeforeDue: Math.max(0, formData.visibleWeeksBeforeDue ?? 0),
+      requiresComment: Boolean(formData.requiresComment),
+      requiresPhotoProof: Boolean(formData.requiresPhotoProof),
+      isMandatory: Boolean(formData.isMandatory),
+      type: formData.isMandatory ? "MANDATORY" : "OPTIONAL",
+      isActive: formData.isActive !== false,
+      startDate: formData.startDate || today,
+      customFrequencyValue: isCustomFrequency ? (formData.customFrequencyValue ?? 7) : undefined,
+      customFrequencyUnit: isCustomFrequency ? (formData.customFrequencyUnit ?? "days") : undefined,
+      criticality: formData.criticality,
+      executionChecklistItems: (formData.executionChecklistItems ?? []).filter((i) => i.text.trim()),
+      updatedAt: Date.now(),
+    });
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 shadow-xl">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-black text-slate-900 uppercase">
-            Redaguoti šabloną
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-900"
-          >
-            <X size={24} />
+      <div className="bg-white rounded-lg w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-xl">
+        <div className="flex justify-between items-center p-5 border-b border-slate-200">
+          <h2 className="text-lg font-black text-slate-900">Periodinis šablonas</h2>
+          <button onClick={onClose} className="p-2 rounded-md text-slate-400 hover:text-slate-900 hover:bg-slate-100">
+            <X size={20} />
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Left Column */}
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                Užduoties ID
-              </label>
-              <input
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-500"
-                value={formData.id}
-                readOnly
-              />
+        <div className="p-5 space-y-5">
+          {/* WORKFLOW */}
+          <FieldError error={errors.workflow}>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Workflow</label>
+            <select
+              className={`w-full p-2 border rounded-md text-sm ${errors.workflow ? "border-red-500" : "border-slate-200"}`}
+              value={formData.destinationWorkflowTypeId || ""}
+              onChange={(e) => setFormData((cur) => ({ ...cur, destinationWorkflowTypeId: e.target.value || undefined }))}
+            >
+              <option value="">Pasirinkite workflow</option>
+              {enabledWorkflows.map((wf) => (
+                <option key={wf.id} value={wf.id}>{wf.name}</option>
+              ))}
+            </select>
+          </FieldError>
+
+          {/* PAVADINIMAS */}
+          <FieldError error={errors.name}>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pavadinimas</label>
+            <input
+              className={`w-full p-2 border rounded-md text-sm ${errors.name ? "border-red-500" : "border-slate-200"}`}
+              value={formData.name || formData.title || ""}
+              onChange={(e) => setFormData((cur) => ({ ...cur, name: e.target.value, title: e.target.value }))}
+            />
+          </FieldError>
+
+          {/* PADALINIAI */}
+          <FieldError error={errors.clubs}>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase">Padaliniai</label>
+              <span className="text-xs font-semibold text-slate-400">{formData.targetClubIds?.length || 0} pasirinkta</span>
             </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex justify-between">
-                Pavadinimas
-                {errors.name && (
-                  <span className="text-red-500 normal-case font-normal flex items-center gap-1">
-                    <AlertCircle size={10} /> {errors.name}
-                  </span>
-                )}
-              </label>
-              <input
-                className={`w-full p-2 border rounded-lg text-sm ${errors.name ? "border-red-500" : "border-slate-200"}`}
-                value={formData.name || formData.title || ""}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    name: e.target.value,
-                    title: e.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                Aprašas / Instrukcija
-              </label>
-              <RichTextEditor
-                value={formData.description || ""}
-                onChange={(val) => setFormData({ ...formData, description: val })}
-                placeholder="Įveskite užduoties aprašymą..."
-                minHeight="100px"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex justify-between">
-                Atsakingas
-                {errors.assignee && (
-                  <span className="text-red-500 normal-case font-normal flex items-center gap-1">
-                    <AlertCircle size={10} /> {errors.assignee}
-                  </span>
-                )}
-              </label>
-              <AssigneeDropdown
-                users={users}
-                clubs={clubs}
-                selectedClubId={selectedClubId}
-                error={!!errors.assignee}
-                selectedUserId={
-                  formData.assigned_to ||
-                  (formData.assignedTo ? formData.assignedTo.id : "")
-                }
-                onSelect={(userId) => {
-                  const user = users.find((u) => u.id === userId);
-                  if (user) {
-                    setFormData({
-                      ...formData,
-                      assigned_to: user.id,
-                      assignedTo: {
-                        id: user.id,
-                        name: user.name,
-                        role: user.role,
-                      },
-                    });
-                  } else {
-                    setFormData({
-                      ...formData,
-                      assigned_to: "",
-                      assignedTo: undefined,
-                    });
-                  }
-                }}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                Paskirtis / Modulis
-              </label>
-              <select
-                className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                value={formData.targetSubmodule || "GENERAL"}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    targetSubmodule: e.target.value as "GENERAL" | "EQUIPMENT_FAULT",
-                  })
-                }
-              >
-                <option value="GENERAL">🏢 Patalpų darbai / Bendras</option>
-                <option value="EQUIPMENT_FAULT">🏋️ Treniruoklių darbai</option>
-                <option value="UZSAKYMAI">📦 Užsakymai</option>
-              </select>
-            </div>
-
-            {formData.targetSubmodule === "EQUIPMENT_FAULT" && (
-              <>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                    Gedimo tipas (SLA & Prioritetas)
-                  </label>
-                  <select
-                    className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                    value={formData.issueTypeId || ""}
-                    onChange={(e) => {
-                      const issue = equipmentIssueTypesList.find(i => i.id === e.target.value);
-                      setFormData({
-                        ...formData,
-                        issueTypeId: e.target.value,
-                        slaHours: issue ? issue.sla_hours : formData.slaHours,
-                      });
-                    }}
-                  >
-                    <option value="">Pasirinkite gedimo tipą...</option>
-                    {equipmentIssueTypesList.map(issue => (
-                      <option key={issue.id} value={issue.id}>{issue.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                    Konkretus treniruoklis (neprivaloma)
-                  </label>
-                  <select
-                    className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                    value={formData.equipmentId || ""}
-                    onChange={(e) => setFormData({ ...formData, equipmentId: e.target.value })}
-                  >
-                    <option value="">Visi treniruokliai (pagal gedimą)</option>
-                    {equipmentList
-                      .filter(eq => !selectedClubId || eq.club_id === selectedClubId)
-                      .map(eq => (
-                        <option key={eq.id} value={eq.id}>{eq.name} #{eq.number}</option>
-                      ))
-                    }
-                  </select>
-                </div>
-              </>
-            )}
-
-            {formData.targetSubmodule === "UZSAKYMAI" && (
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                  Užsakymo tipas
-                </label>
-                <select
-                  className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                  value={formData.orderType || "SMULKUS"}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      orderType: e.target.value as "SMULKUS" | "VENDING",
-                    })
-                  }
-                >
-                  <option value="SMULKUS">🛠️ Smulkus inventorius</option>
-                  <option value="VENDING">🍫 Vending prekės</option>
-                  <option value="FIRST_AID_KIT">🩹 Vaistinėlės turinys</option>
-                </select>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                Prioritetas
-              </label>
-              <select
-                className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                value={formData.priority || "IMPORTANT"}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    priority: e.target.value as "IMPORTANT" | "CRITICAL",
-                  })
-                }
-              >
-                <option value="CRITICAL">🔴 Kritiškai svarbus</option>
-                <option value="IMPORTANT">🟡 Svarbus</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                SOP URL
-              </label>
-              <input
-                className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                value={formData.sopUrl || ""}
-                onChange={(e) =>
-                  setFormData({ ...formData, sopUrl: e.target.value })
-                }
-                placeholder="https://..."
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex justify-between">
-                Periodiškumas
-                {errors.frequency && (
-                  <span className="text-red-500 normal-case font-normal flex items-center gap-1">
-                    <AlertCircle size={10} /> {errors.frequency}
-                  </span>
-                )}
-              </label>
-              <select
-                className={`w-full p-2 border rounded-lg text-sm ${errors.frequency ? "border-red-500" : "border-slate-200"}`}
-                value={
-                  formData.frequency === "custom_days"
-                    ? "custom"
-                    : formData.frequency
-                }
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === "custom") {
-                    setFormData({
-                      ...formData,
-                      frequency: "custom_days",
-                      customFrequencyMonths: 1,
-                    });
-                  } else {
-                    setFormData({
-                      ...formData,
-                      frequency: val as any,
-                      customFrequencyMonths: undefined,
-                    });
-                  }
-                }}
-              >
-                <option value="daily">Kasdien</option>
-                <option value="weekly">Kas savaitę</option>
-                <option value="monthly">Kas mėnesį</option>
-                <option value="quarterly">Kas ketvirtį</option>
-                <option value="6_months">Kas 6 mėn</option>
-                <option value="yearly">Kas metus</option>
-                <option value="custom">Custom</option>
-              </select>
-              {formData.frequency === "custom_days" && (
-                <div className="mt-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    Kas kiek mėnesių?
-                  </label>
-                  <input
-                    type="number"
-                    className="w-full p-2 border border-slate-200 rounded-lg text-sm"
-                    value={formData.customFrequencyMonths || 1}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        customFrequencyMonths: parseInt(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="pt-4 border-t border-slate-100">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <div className="relative">
+            <div className={`max-h-56 overflow-y-auto border rounded-md divide-y divide-slate-100 ${errors.clubs ? "border-red-500" : "border-slate-200"}`}>
+              {activeClubs.map((club) => (
+                <label key={club.id} className="flex items-center gap-3 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
                   <input
                     type="checkbox"
-                    className="peer sr-only"
-                    checked={!!formData.proofRequired}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        proofRequired: e.target.checked,
-                        proofConfig: e.target.checked
-                          ? {
-                              allowedTypes: ["image", "video"],
-                              maxFiles: 5,
-                              maxTotalVideoSizeMb: 100,
-                            }
-                          : undefined,
-                      })
-                    }
+                    className="h-4 w-4 rounded border-slate-300"
+                    checked={formData.targetClubIds?.includes(club.id) || false}
+                    onChange={() => toggleClub(club.id)}
                   />
-                  <div className="w-5 h-5 border-2 border-slate-200 rounded group-hover:border-slate-300 peer-checked:bg-slate-900 peer-checked:border-slate-900 transition-colors"></div>
-                  <CheckCircle2
-                    size={14}
-                    className="absolute top-0.5 left-0.5 text-white scale-0 peer-checked:scale-100 transition-transform"
-                  />
-                </div>
-                <span className="text-xs font-bold text-slate-700 uppercase">
-                  Būtinas atlikimo įrodymas
-                </span>
-              </label>
-              {formData.proofRequired && (
-                <p className="mt-1 text-[10px] text-slate-400">
-                  Uždarant užduotį reikės įkelti foto/video
-                </p>
-              )}
+                  <span className="font-semibold text-slate-800">{club.name}</span>
+                  <span className="ml-auto text-xs text-slate-400">{club.region}</span>
+                </label>
+              ))}
             </div>
+          </FieldError>
+
+          {/* PERIODIŠKUMAS */}
+          <FieldError error={errors.frequency}>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Periodiškumas</label>
+            <select
+              className={`w-full p-2 border rounded-md text-sm ${errors.frequency ? "border-red-500" : "border-slate-200"}`}
+              value={formData.frequency || "monthly"}
+              onChange={(e) =>
+                setFormData((cur) => ({
+                  ...cur,
+                  frequency: e.target.value as PeriodicTemplate["frequency"],
+                  recurrence: e.target.value as PeriodicTemplate["frequency"],
+                }))
+              }
+            >
+              <option value="daily">Kasdien</option>
+              <option value="weekly">Kas savaitę</option>
+              <option value="monthly">Kas mėnesį</option>
+              <option value="quarterly">Kas ketvirtį</option>
+              <option value="6_months">Kas 6 mėn.</option>
+              <option value="yearly">Kas metus</option>
+              <option value="custom_frequency">Pasirinkti dažnumą...</option>
+            </select>
+            {!isCustomFrequency && (
+              <p className="mt-1 text-xs text-slate-500">
+                Kita užduotis sukuriama tik tada, kai paskutinė užduotis pažymima kaip Atlikta.
+              </p>
+            )}
+          </FieldError>
+
+          {/* PRADŽIOS DATA — FEATURE 1 */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Pradžios data</label>
+            <input
+              type="date"
+              className="w-full p-2 border border-slate-200 rounded-md text-sm"
+              value={formData.startDate || today}
+              onChange={(e) => setFormData((cur) => ({ ...cur, startDate: e.target.value }))}
+            />
+            <p className="mt-1 text-xs text-slate-500">Pirmoji instancija generuojama nuo šios datos.</p>
           </div>
 
-          {/* Right Column */}
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-1 flex justify-between">
-                  Sporto klubas
-                  {errors.clubs && (
-                    <span className="text-red-500 normal-case font-normal flex items-center gap-1">
-                      <AlertCircle size={10} /> {errors.clubs}
-                    </span>
-                  )}
-                </label>
-                <select
-                  className={`w-full p-2 border rounded-lg text-sm ${errors.clubs ? "border-red-500" : "border-slate-200"}`}
-                  value={selectedClubId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setFormData({
-                      ...formData,
-                      targetMode: "SELECTED_CLUBS",
-                      targetClubIds: [id],
-                    });
-                  }}
-                >
-                  <option value="">Pasirinkite klubą...</option>
-                  {clubs.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {selectedClub && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Regionas
-                    </label>
-                    <input
-                      readOnly
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-500"
-                      value={selectedClub.region}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                      Miestas
-                    </label>
-                    <input
-                      readOnly
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-500"
-                      value={selectedClub.city}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl space-y-3">
-              <h3 className="text-xs font-black text-slate-900 uppercase">
-                Tiekėjas
-              </h3>
-              <div className="space-y-2">
+          {/* PASIRINKTI DAŽNUMĄ — FEATURE 2, conditional */}
+          {isCustomFrequency && (
+            <FieldError error={errors.customFreq}>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Dažnumas</label>
+              <div className="flex gap-2">
                 <input
-                  placeholder="Pavadinimas"
-                  className="w-full p-2 border border-slate-200 rounded-lg text-xs"
-                  value={formData.supplier?.name || ""}
+                  type="number"
+                  min={1}
+                  max={365}
+                  className={`w-24 p-2 border rounded-md text-sm ${errors.customFreq ? "border-red-500" : "border-slate-200"}`}
+                  value={formData.customFrequencyValue ?? 7}
                   onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      supplier: { ...formData.supplier!, name: e.target.value },
-                    })
+                    setFormData((cur) => ({
+                      ...cur,
+                      customFrequencyValue: Math.max(1, Math.min(365, Number(e.target.value) || 1)),
+                    }))
                   }
                 />
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    placeholder="Tel. nr."
-                    className="w-full p-2 border border-slate-200 rounded-lg text-xs"
-                    value={formData.supplier?.phone || ""}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        supplier: {
-                          ...formData.supplier!,
-                          phone: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                  <input
-                    placeholder="El. paštas"
-                    className="w-full p-2 border border-slate-200 rounded-lg text-xs"
-                    value={formData.supplier?.email || ""}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        supplier: {
-                          ...formData.supplier!,
-                          email: e.target.value,
-                        },
-                      })
-                    }
-                  />
-                </div>
+                <select
+                  className="flex-1 p-2 border border-slate-200 rounded-md text-sm"
+                  value={formData.customFrequencyUnit ?? "days"}
+                  onChange={(e) =>
+                    setFormData((cur) => ({
+                      ...cur,
+                      customFrequencyUnit: e.target.value as "days" | "weeks" | "months",
+                    }))
+                  }
+                >
+                  <option value="days">Dienų</option>
+                  <option value="weeks">Savaičių</option>
+                  <option value="months">Mėnesių</option>
+                </select>
               </div>
+            </FieldError>
+          )}
+
+          {/* KIEK SAVAIČIŲ PRIEŠ RODYTI */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+              Kiek savaičių prieš rodyti
+            </label>
+            <input
+              type="number"
+              min={0}
+              className="w-full p-2 border border-slate-200 rounded-md text-sm"
+              value={formData.visibleWeeksBeforeDue ?? 4}
+              onChange={(e) =>
+                setFormData((cur) => ({
+                  ...cur,
+                  visibleWeeksBeforeDue: Math.max(0, Number(e.target.value) || 0),
+                }))
+              }
+            />
+          </div>
+
+          {/* KRITIŠKUMAS */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Kritiškumas</label>
+            <select
+              className="w-full p-2 border border-slate-200 rounded-md text-sm"
+              value={formData.criticality ?? ""}
+              onChange={(e) =>
+                setFormData((cur) => ({
+                  ...cur,
+                  criticality: (e.target.value as PeriodicCriticality) || undefined,
+                }))
+              }
+            >
+              <option value="">Automatiškai (pagal privalomumą)</option>
+              <option value="CRITICAL">Kritinis</option>
+              <option value="IMPORTANT">Svarbus</option>
+              <option value="STANDARD">Standartinis</option>
+            </select>
+          </div>
+
+          {/* PRIVALOMA / REIKIA KOMENTARO / REIKIA FOTO */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <ToggleField
+              label="Privaloma"
+              checked={formData.isMandatory ?? formData.type === "MANDATORY"}
+              onChange={(checked) =>
+                setFormData((cur) => ({
+                  ...cur,
+                  isMandatory: checked,
+                  type: checked ? "MANDATORY" : "OPTIONAL",
+                }))
+              }
+            />
+            <ToggleField
+              label="Reikia komentaro"
+              checked={Boolean(formData.requiresComment)}
+              onChange={(checked) => setFormData((cur) => ({ ...cur, requiresComment: checked }))}
+            />
+            <ToggleField
+              label="Reikia foto"
+              checked={Boolean(formData.requiresPhotoProof)}
+              onChange={(checked) =>
+                setFormData((cur) => ({ ...cur, requiresPhotoProof: checked, proofRequired: checked }))
+              }
+            />
+          </div>
+
+          {/* SOP NUORODA */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">SOP nuoroda</label>
+            <input
+              className="w-full p-2 border border-slate-200 rounded-md text-sm"
+              value={formData.sopUrl || ""}
+              onChange={(e) =>
+                setFormData((cur) => ({
+                  ...cur,
+                  sopUrl: e.target.value,
+                  sopRequired: Boolean(e.target.value),
+                }))
+              }
+              placeholder="https://..."
+            />
+          </div>
+
+          {/* VYKDYMO KONTROLINIS SĄRAŠAS — FEATURE 3 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-bold text-slate-500 uppercase">
+                Vykdymo kontrolinis sąrašas
+              </label>
+              <span className="text-xs text-slate-400">{checklist.length}/5</span>
             </div>
 
-            <div className="pt-2">
-              <h3 className="text-xs font-black text-slate-900 uppercase mb-3 flex items-center gap-2">
-                <History size={14} className="text-slate-400" />
-                Ankstesni atlikimai
-              </h3>
-              <div className="space-y-2">
-                {history.length > 0 ? (
-                  history.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-2 border border-slate-100 rounded-lg text-[10px] flex justify-between items-center group hover:border-slate-200 transition-colors"
-                    >
-                      <div>
-                        <div className="font-bold text-slate-700">
-                          {new Date(item.dueDate).toLocaleDateString()}
-                        </div>
-                        <div className="text-slate-400">
-                          {item.supplier || "Tiekėjas nežinomas"}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-slate-900">
-                          {item.actualCost || 0} €
-                        </div>
-                        <button className="text-brand-lime hover:underline">
-                          Sąskaita
-                        </button>
-                      </div>
+            {checklist.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {checklist.map((item, idx) => (
+                  <div key={item.id} className="flex items-center gap-2 bg-slate-50 rounded-lg p-2">
+                    <div className="flex flex-col gap-0.5">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => moveChecklistItem(item.id, -1)}
+                        className="p-0.5 rounded text-slate-400 hover:text-slate-700 disabled:opacity-20"
+                      >
+                        <ArrowUp size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === checklist.length - 1}
+                        onClick={() => moveChecklistItem(item.id, 1)}
+                        className="p-0.5 rounded text-slate-400 hover:text-slate-700 disabled:opacity-20"
+                      >
+                        <ArrowDown size={12} />
+                      </button>
                     </div>
-                  ))
-                ) : (
-                  <div className="p-4 border border-dashed border-slate-200 rounded-lg text-center text-[10px] text-slate-400">
-                    Ankstesnių atlikimų nėra
+
+                    <span className="text-[10px] font-black text-slate-400 w-4 shrink-0">{item.order}.</span>
+
+                    <input
+                      className="flex-1 bg-white border border-slate-200 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-slate-300"
+                      placeholder="Žingsnio aprašymas..."
+                      value={item.text}
+                      onChange={(e) => updateChecklistItem(item.id, { text: e.target.value })}
+                    />
+
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-500 shrink-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-3 w-3 rounded border-slate-300"
+                        checked={item.required}
+                        onChange={(e) => updateChecklistItem(item.id, { required: e.target.checked })}
+                      />
+                      Priv.
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => removeChecklistItem(item.id)}
+                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
-                )}
+                ))}
               </div>
-            </div>
+            )}
+
+            <button
+              type="button"
+              onClick={addChecklistItem}
+              disabled={checklist.length >= 5}
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed px-2 py-1.5 rounded-md hover:bg-slate-100 transition-colors"
+            >
+              <Plus size={13} />
+              Pridėti žingsnį
+            </button>
+          </div>
+
+          {/* STATUSAS */}
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Statusas</label>
+            <select
+              className="w-full p-2 border border-slate-200 rounded-md text-sm"
+              value={formData.isActive === false ? "inactive" : "active"}
+              onChange={(e) => setFormData((cur) => ({ ...cur, isActive: e.target.value === "active" }))}
+            >
+              <option value="active">Aktyvi</option>
+              <option value="inactive">Neaktyvi</option>
+            </select>
           </div>
         </div>
 
-        <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 text-sm font-bold text-slate-600 hover:text-slate-900"
-          >
+        <div className="flex justify-end gap-2 p-5 border-t border-slate-200">
+          <button onClick={onClose} className="px-5 py-2 text-sm font-bold text-slate-600 hover:text-slate-900">
             Atšaukti
           </button>
           <button
             onClick={handleSave}
-            className="px-8 py-2 bg-slate-900 text-white rounded-xl text-sm font-black uppercase tracking-wider hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200"
+            className="px-6 py-2 bg-slate-900 text-white rounded-md text-sm font-black hover:bg-slate-800"
           >
             Išsaugoti
           </button>
@@ -666,3 +487,41 @@ export const TemplateEditModal: React.FC<TemplateEditModalProps> = ({
     </div>
   );
 };
+
+const FieldError = ({
+  children,
+  error,
+}: {
+  children: React.ReactNode;
+  error?: string;
+}) => (
+  <div>
+    {children}
+    {error && (
+      <div className="mt-1 flex items-center gap-1 text-xs font-semibold text-red-600">
+        <AlertCircle size={12} />
+        {error}
+      </div>
+    )}
+  </div>
+);
+
+const ToggleField = ({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) => (
+  <label className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50">
+    <input
+      type="checkbox"
+      className="h-4 w-4 rounded border-slate-300"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+    {label}
+  </label>
+);

@@ -25,7 +25,7 @@ export const OpsFlowView: React.FC<Props> = React.memo(({ tasks, onNavigateTo })
           return t.status === status;
       }
       if (type === 'uzsakymai' && t.type === 'ORDER') return t.status === status;
-      if (type === 'periodiniai' && t.periodic?.isPeriodic) return t.status === status;
+      if (type === 'periodiniai' && (t.source === 'PERIODIC' || (t as any).periodicTemplateId)) return t.status === status;
       return false;
     }).length;
   }, [tasks]);

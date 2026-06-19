@@ -1,3 +1,4 @@
+// SEED DATA FROZEN — DO NOT MODIFY (beta v1.0)
 import {
   AlertCircle,
   Camera,
@@ -53,7 +54,7 @@ export interface WorkflowType {
   hover: string;
   enabled: boolean;
   objectType: WorkflowObjectType;
-  assetTypeId: string;
+  assetTypeId: string | null;
   qrMode: WorkflowQrMode;
   usesScope: boolean;
   ownerUserId: string | null;
@@ -120,15 +121,12 @@ const assetTypeIds = {
   orders:
     assetTypes.find((assetType) => assetType.code === "ORDERS")?.id ||
     "asset-type-orders",
-  generic:
-    assetTypes.find((assetType) => assetType.code === "GENERIC")?.id ||
-    "asset-type-generic",
 };
 
 const baseWorkflow = {
   statuses: defaultStatuses,
   objectType: "GENERIC" as const,
-  assetTypeId: assetTypeIds.generic,
+  assetTypeId: null,
   qrMode: "OFF" as const,
   usesScope: false,
   ownerUserId: null,
@@ -180,7 +178,7 @@ export const workflowTypes: WorkflowType[] = [
     assetTypeId: assetTypeIds.facility,
     qrMode: "ASSET_BASED",
     usesScope: true,
-    ownerUserId: null,
+    ownerUserId: "u3",
     category: "DARBAI",
     requiredFields: [
       { id: "clubId", label: "Sporto klubas", type: "club", required: true },
@@ -210,7 +208,7 @@ export const workflowTypes: WorkflowType[] = [
     assetTypeId: assetTypeIds.equipment,
     qrMode: "ASSET_BASED",
     usesScope: true,
-    ownerUserId: null,
+    ownerUserId: "u3",
     category: "DARBAI",
     requiredFields: [
       { id: "clubId", label: "Sporto klubas", type: "club", required: true },
