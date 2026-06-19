@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, X, AlertCircle, Plus, MessageSquare, CheckCircle, ChevronDown } from 'lucide-react';
 import { getEquipmentAssetObjects } from '../mock-db/assetObjects';
-import { clubs } from '../mock-db/clubs';
+import type { Club } from '../mock-db/clubs';
 import { cn } from '../lib/utils';
 import { Fault } from '../mock-db/faults';
 import { Status } from '../types/faults';
@@ -14,16 +14,22 @@ const equipmentList = getEquipmentAssetObjects();
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  clubs: Club[];
   faults: Fault[];
   onAddComment: (faultId: string, comment: string) => void;
   onRegisterFault: (clubId: string, equipmentId: string) => void;
 }
 
-export const EquipmentSearchModal = ({ isOpen, onClose, faults, onAddComment, onRegisterFault }: Props) => {
+export const EquipmentSearchModal = ({ isOpen, onClose, clubs, faults, onAddComment, onRegisterFault }: Props) => {
   const [selectedClubId, setSelectedClubId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEquipment, setSelectedEquipment] = useState<any | null>(null);
   const [commentText, setCommentText] = useState('');
+
+  const activeClubs = useMemo(
+    () => clubs.filter((club) => club.is_active !== false),
+    [clubs],
+  );
 
   const filteredEquipment = useMemo(() => {
     if (!selectedClubId) return [];
@@ -88,7 +94,7 @@ export const EquipmentSearchModal = ({ isOpen, onClose, faults, onAddComment, on
                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     <option value="">Pasirinkite sporto klubą...</option>
-                    {clubs.map((c) => (
+                    {activeClubs.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>

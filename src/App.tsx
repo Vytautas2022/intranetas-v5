@@ -324,7 +324,6 @@ import {
 } from "./logic/permissionEngine";
 
 const CLUBS = clubs;
-const ACTIVE_CLUBS = clubs.filter((c) => c.is_active !== false);
 const SUPPLIERS = MOCK_SUPPLIERS;
 
 const getWorkflowCreateModuleId = (
@@ -3810,6 +3809,10 @@ function MainApp() {
   >(MOCK_INVENTORY_SETTINGS);
   const [suppliers, setSuppliers] = useState<Supplier[]>(MOCK_SUPPLIERS);
   const [appClubs, setAppClubs] = useState<Club[]>(clubs);
+  const activeRegistrationClubs = useMemo(
+    () => appClubs.filter((club) => club.is_active !== false),
+    [appClubs],
+  );
   const [appUsers, setAppUsers] = useState<User[]>(() => {
     return hydrateMockCollection("app_users", users, {
       mergeSeed: true,
@@ -8114,7 +8117,7 @@ ${task.updatedBy}
                           )}
                         >
                           <option value="">Pasirinkite sporto klubą</option>
-                          {ACTIVE_CLUBS.map((c) => (
+                          {activeRegistrationClubs.map((c) => (
                             <option
                               key={`club-option-reg-1-${c.id}`}
                               value={c.id}
@@ -8590,7 +8593,7 @@ ${task.updatedBy}
                             )}
                           >
                             <option value="">Pasirinkite sporto klubą</option>
-                            {ACTIVE_CLUBS.map((c) => (
+                            {activeRegistrationClubs.map((c) => (
                               <option
                                 key={`club-option-reg-2-${c.id}`}
                                 value={c.id}
@@ -8969,7 +8972,7 @@ ${task.updatedBy}
                             )}
                           >
                             <option value="">Pasirinkite sporto klubą</option>
-                            {ACTIVE_CLUBS.map((c) => (
+                            {activeRegistrationClubs.map((c) => (
                               <option
                                 key={`club-option-reg-3-${c.id}`}
                                 value={c.id}
@@ -8995,9 +8998,7 @@ ${task.updatedBy}
                           <>
                             <div className="space-y-1.5 relative">
                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                {isFacilityRegistration
-                                  ? "Kur įvyko gedimas?"
-                                  : selectedRegistrationAssetType?.name || "Objektas"}
+                                Gedimas
                               </label>
                               <div
                                 className="relative"
@@ -9734,6 +9735,7 @@ ${task.updatedBy}
         <EquipmentSearchModal
           isOpen={isEquipmentSearchModalOpen}
           onClose={() => setIsEquipmentSearchModalOpen(false)}
+          clubs={activeRegistrationClubs}
           faults={faults}
           onAddComment={(faultId, text) => {
             const f = faults.find((x) => x.id === faultId);
