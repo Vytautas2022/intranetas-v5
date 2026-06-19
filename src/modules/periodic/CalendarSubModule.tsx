@@ -1287,14 +1287,14 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                     }}
                     className="flex-1 py-3 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-colors shadow-sm"
                   >
-                    {occ.status === 'completed_on_time' || occ.status === 'completed_late' ? 'Atzymeti' : 'Atlikti'}
+                    {occ.status === 'completed_on_time' || occ.status === 'completed_late' ? 'Atžymėti' : 'Atlikti'}
                   </button>
                   <button
                     onClick={() => {
                       const tmpl = localTemplates.find(t => t.id === occ.taskId);
                       const crit = tmpl?.criticality ?? (tmpl?.isMandatory ? 'CRITICAL' : 'STANDARD');
                       if (crit === 'CRITICAL') {
-                        alert('Kritine uzduotis negali buti ataukta.');
+                        alert('Kritinė užduotis negali būti ataukta.');
                         return;
                       }
                       setSelectedOccurrence(null);

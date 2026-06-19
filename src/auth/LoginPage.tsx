@@ -125,7 +125,7 @@ export const LoginPage = () => {
               Prisijunkite prie sistemos
             </h2>
             <p className="text-sm font-medium leading-relaxed text-slate-500">
-              Iveskite savo Sportgates intraneto paskyros duomenis.
+              Įveskite savo Sportgates intraneto paskyros duomenis.
             </p>
           </div>
         </div>
@@ -140,7 +140,7 @@ export const LoginPage = () => {
 
           <label className="block space-y-2">
             <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-              El. pastas
+              El. paštas
             </span>
             <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 focus-within:border-brand-lime focus-within:bg-white transition-all">
               <Mail size={18} className="text-slate-400" />
@@ -158,7 +158,7 @@ export const LoginPage = () => {
 
           <label className="block space-y-2">
             <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">
-              Slaptazodis
+              Slaptažodis
             </span>
             <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 focus-within:border-brand-lime focus-within:bg-white transition-all">
               <Lock size={18} className="text-slate-400" />
@@ -193,23 +193,25 @@ export const LoginPage = () => {
             Prisijungti
           </button>
 
-          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-              Mock test users
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {mockTestUserEmails.map((mockEmail) => (
-                <button
-                  key={mockEmail}
-                  type="button"
-                  onClick={() => setEmail(mockEmail)}
-                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:text-slate-950"
-                >
-                  {mockEmail}
-                </button>
-              ))}
+          {import.meta.env.DEV && (
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Mock test users
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {mockTestUserEmails.map((mockEmail) => (
+                  <button
+                    key={mockEmail}
+                    type="button"
+                    onClick={() => setEmail(mockEmail)}
+                    className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:text-slate-950"
+                  >
+                    {mockEmail}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {hasGoogleClientId && (
             <div className="space-y-3">

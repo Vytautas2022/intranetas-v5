@@ -408,7 +408,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         console.debug("[auth] Email/password login failed:", normalizedEmail);
         return {
           success: false,
-          error: "Neteisingas el. pastas arba slaptazodis.",
+          error: "Neteisingas el. paštas arba slaptažodis.",
         };
       }
 

@@ -324,6 +324,7 @@ import {
 } from "./logic/permissionEngine";
 
 const CLUBS = clubs;
+const ACTIVE_CLUBS = clubs.filter((c) => c.is_active !== false);
 const SUPPLIERS = MOCK_SUPPLIERS;
 
 const getWorkflowCreateModuleId = (
@@ -4424,7 +4425,7 @@ function MainApp() {
       }
     } else if (isFacilityRegistration) {
       const template = facilityRegistrationObjects.find(
-        (t) => t.id === regForm.equipmentId,
+        (t) => t.id === selectedAssetObjectLegacyId,
       );
       if (template && template.priority !== regForm.priority) {
         setRegForm((prev) => ({
@@ -4453,6 +4454,7 @@ function MainApp() {
     currentAdminTemplate,
     isEquipmentRegistration,
     isFacilityRegistration,
+    selectedAssetObjectLegacyId,
   ]);
 
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -8112,7 +8114,7 @@ ${task.updatedBy}
                           )}
                         >
                           <option value="">Pasirinkite sporto klubą</option>
-                          {CLUBS.map((c) => (
+                          {ACTIVE_CLUBS.map((c) => (
                             <option
                               key={`club-option-reg-1-${c.id}`}
                               value={c.id}
@@ -8588,7 +8590,7 @@ ${task.updatedBy}
                             )}
                           >
                             <option value="">Pasirinkite sporto klubą</option>
-                            {CLUBS.map((c) => (
+                            {ACTIVE_CLUBS.map((c) => (
                               <option
                                 key={`club-option-reg-2-${c.id}`}
                                 value={c.id}
@@ -8967,7 +8969,7 @@ ${task.updatedBy}
                             )}
                           >
                             <option value="">Pasirinkite sporto klubą</option>
-                            {CLUBS.map((c) => (
+                            {ACTIVE_CLUBS.map((c) => (
                               <option
                                 key={`club-option-reg-3-${c.id}`}
                                 value={c.id}
@@ -8993,8 +8995,9 @@ ${task.updatedBy}
                           <>
                             <div className="space-y-1.5 relative">
                               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                                {selectedRegistrationAssetType?.name ||
-                                  "Objektas"}
+                                {isFacilityRegistration
+                                  ? "Kur įvyko gedimas?"
+                                  : selectedRegistrationAssetType?.name || "Objektas"}
                               </label>
                               <div
                                 className="relative"

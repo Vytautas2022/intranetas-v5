@@ -4502,7 +4502,7 @@ function UsersAdmin({
     }
 
     if (!normalizedEmail) {
-      alert("El. pastas yra privalomas");
+      alert("El. paštas yra privalomas");
       return;
     }
 
@@ -4521,7 +4521,7 @@ function UsersAdmin({
     );
 
     if (duplicateEmail) {
-      alert("Sis el. pastas jau naudojamas");
+      alert("Šis el. paštas jau naudojamas");
       return;
     }
 
@@ -4655,7 +4655,7 @@ function UsersAdmin({
           <thead>
             <tr className="border-b border-slate-200 text-slate-500 text-sm">
               <th className="pb-3 font-medium">Vardas</th>
-              <th className="pb-3 font-medium">El. pastas</th>
+              <th className="pb-3 font-medium">El. paštas</th>
               <th className="pb-3 font-medium">Priskirtos rolės</th>
               <th className="pb-3 font-medium">Regionai / Klubai</th>
               <th className="pb-3 font-medium">Statusas</th>
@@ -4914,7 +4914,7 @@ function UsersAdmin({
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-              El. pastas
+              El. paštas
             </label>
             <input
               type="email"
