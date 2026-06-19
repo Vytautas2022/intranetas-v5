@@ -9756,7 +9756,8 @@ ${task.updatedBy}
             const equipmentWorkflow = workflowTypes.find(
               (workflow) =>
                 workflow.objectType === "EQUIPMENT" &&
-                Boolean(workflow.active ?? workflow.enabled),
+                Boolean(workflow.active ?? workflow.enabled) &&
+                !workflow.archivedAt,
             );
             if (
               !equipmentWorkflow ||
