@@ -17,6 +17,7 @@ export const getWorkflowKanbanLanes = (
   const activeWorkflows = workflowTypes.filter(
     (workflow) =>
       workflow.enabled &&
+      !workflow.archivedAt &&
       workflow.kanbanSettings.enabled &&
       (activeWorkflowIdSet.size === 0 || activeWorkflowIdSet.has(workflow.id)),
   );
@@ -24,7 +25,8 @@ export const getWorkflowKanbanLanes = (
   const workflowsForLanes = activeWorkflows.length
     ? activeWorkflows
     : workflowTypes.filter(
-        (workflow) => workflow.enabled && workflow.kanbanSettings.enabled,
+        (workflow) =>
+          workflow.enabled && !workflow.archivedAt && workflow.kanbanSettings.enabled,
       );
 
   const configuredLanes = workflowsForLanes.flatMap((workflow) =>

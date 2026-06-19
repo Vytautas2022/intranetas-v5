@@ -9,6 +9,7 @@ import {
   Activity,
   Plus,
   Trash2,
+  Archive,
   Edit2,
   X,
   AlertCircle,
@@ -627,6 +628,10 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setWorkflows={setWorkflowTypes}
             users={users}
             assetTypes={assetTypes}
+            cards={tasks}
+            orders={orders}
+            periodicTemplates={periodicTemplates}
+            currentUser={currentUser}
           />
         )}
         {path.includes(getTabRoute("audit")) &&
@@ -3144,13 +3149,24 @@ function WorkflowTypesAdmin({
   setWorkflows,
   users,
   assetTypes,
+  cards,
+  orders,
+  periodicTemplates,
+  currentUser,
 }: {
   workflows: WorkflowType[];
   setWorkflows?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
   users: User[];
   assetTypes: AssetType[];
+  cards: any[];
+  orders: any[];
+  periodicTemplates: any[];
+  currentUser?: AuthUser | null;
 }) {
   const [editing, setEditing] = useState<WorkflowType | null>(null);
+  const [workflowArchiveFilter, setWorkflowArchiveFilter] = useState<
+    "active" | "archive"
+  >("active");
   const activeUsers = useMemo(
     () => users.filter((user) => user.is_active !== false),
     [users],
@@ -3165,6 +3181,57 @@ function WorkflowTypesAdmin({
   const getAssetTypeLabel = (assetTypeId?: string | null) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
     "Be turto tipo";
+
+  const getWorkflowUsage = useCallback(
+    (workflow: WorkflowType) => {
+      const matchesWorkflowId = (item: any) =>
+        item?.workflowTypeId === workflow.id ||
+        item?.destinationWorkflowTypeId === workflow.id ||
+        item?.workflowId === workflow.id;
+
+      return {
+        cards: [...cards, ...orders].filter(matchesWorkflowId).length,
+        periodic: periodicTemplates.filter(matchesWorkflowId).length,
+        registrationForms: workflow.requiredFields?.length ? 1 : 0,
+      };
+    },
+    [cards, orders, periodicTemplates],
+  );
+
+  const archiveWorkflow = (workflow: WorkflowType) => {
+    if (!setWorkflows || workflow.archivedAt) return;
+
+    const usage = getWorkflowUsage(workflow);
+    const confirmed = window.confirm(
+      [
+        `Archyvuoti workflow "${workflow.name}"?`,
+        "",
+        "Workflow naudojamas:",
+        `kortelės: ${usage.cards}`,
+        `periodiniai: ${usage.periodic}`,
+        `registracijos formos: ${usage.registrationForms}`,
+        "",
+        "Archyvuotas workflow nebus rodomas registracijoje ir nebus naudojamas naujoms kortelėms.",
+      ].join("\n"),
+    );
+
+    if (!confirmed) return;
+
+    setWorkflows(
+      workflows.map((item) =>
+        item.id === workflow.id
+          ? {
+              ...item,
+              active: false,
+              enabled: false,
+              archivedAt: Date.now(),
+              archivedBy: currentUser?.name || currentUser?.email || "System",
+              archiveReason: "Manual workflow archive",
+            }
+          : item,
+      ),
+    );
+  };
 
   const saveWorkflow = () => {
     if (!editing || !setWorkflows) return;
@@ -3189,6 +3256,9 @@ function WorkflowTypesAdmin({
       qrMode: editing.qrMode || "OFF",
       usesScope: editing.usesScope ?? false,
       ownerUserId: editing.ownerUserId ?? null,
+      archivedAt: editing.archivedAt,
+      archivedBy: editing.archivedBy,
+      archiveReason: editing.archiveReason,
       kanbanSettings: {
         ...editing.kanbanSettings,
         lanes: editing.statuses.map((status) => status.id),
@@ -3227,6 +3297,12 @@ function WorkflowTypesAdmin({
     });
   };
 
+  const filteredWorkflows = workflows.filter((workflow) =>
+    workflowArchiveFilter === "archive"
+      ? Boolean(workflow.archivedAt)
+      : !workflow.archivedAt,
+  );
+
   return (
     <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -3236,24 +3312,58 @@ function WorkflowTypesAdmin({
             Universal workflow engine konfiguracija is mock DB sluoksnio.
           </p>
         </div>
-        <button
-          onClick={createWorkflow}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
-        >
-          <Plus size={16} /> Sukurti workflow
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            <button
+              type="button"
+              onClick={() => setWorkflowArchiveFilter("active")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-black",
+                workflowArchiveFilter === "active"
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "text-slate-500",
+              )}
+            >
+              Aktyvūs
+            </button>
+            <button
+              type="button"
+              onClick={() => setWorkflowArchiveFilter("archive")}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-black",
+                workflowArchiveFilter === "archive"
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "text-slate-500",
+              )}
+            >
+              Archyvas
+            </button>
+          </div>
+          <button
+            onClick={createWorkflow}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
+          >
+            <Plus size={16} /> Sukurti workflow
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {workflows.map((workflow) => {
+        {filteredWorkflows.map((workflow) => {
           const Icon =
             workflowIconMap[workflow.icon as keyof typeof workflowIconMap] ||
             AlertCircle;
+          const usage = getWorkflowUsage(workflow);
 
           return (
             <div
               key={workflow.id}
-              className="border border-slate-200 rounded-2xl p-4 bg-white shadow-sm space-y-4"
+              className={cn(
+                "border rounded-2xl p-4 bg-white shadow-sm space-y-4",
+                workflow.archivedAt
+                  ? "border-amber-200 bg-amber-50/30"
+                  : "border-slate-200",
+              )}
             >
               <div className="flex items-start gap-3">
                 <div
@@ -3272,17 +3382,34 @@ function WorkflowTypesAdmin({
                     <span
                       className={cn(
                         "text-[9px] font-black uppercase rounded-full px-2 py-0.5",
-                        workflow.enabled
+                        workflow.archivedAt
+                          ? "bg-amber-100 text-amber-700"
+                          : workflow.enabled
                           ? "bg-emerald-50 text-emerald-700"
                           : "bg-slate-100 text-slate-500",
                       )}
                     >
-                      {workflow.enabled ? "On" : "Off"}
+                      {workflow.archivedAt ? "Archived" : workflow.enabled ? "On" : "Off"}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-1 line-clamp-2">
                     {workflow.description}
                   </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-[10px] font-black">
+                <div className="rounded-xl bg-slate-50 p-2">
+                  <span className="block text-slate-400 uppercase">Kortelės</span>
+                  {usage.cards}
+                </div>
+                <div className="rounded-xl bg-slate-50 p-2">
+                  <span className="block text-slate-400 uppercase">Periodiniai</span>
+                  {usage.periodic}
+                </div>
+                <div className="rounded-xl bg-slate-50 p-2">
+                  <span className="block text-slate-400 uppercase">Formos</span>
+                  {usage.registrationForms}
                 </div>
               </div>
 
@@ -3319,6 +3446,7 @@ function WorkflowTypesAdmin({
                   role="switch"
                   aria-checked={workflow.enabled}
                   title={workflow.enabled ? "ON" : "OFF"}
+                  disabled={Boolean(workflow.archivedAt)}
                   onClick={() =>
                     setWorkflows?.(
                       workflows.map((item) =>
@@ -3330,7 +3458,9 @@ function WorkflowTypesAdmin({
                   }
                   className={cn(
                     "flex-1 px-3 py-2 rounded-xl border text-xs font-black transition-colors flex items-center justify-between gap-3",
-                    workflow.enabled
+                    workflow.archivedAt
+                      ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                      : workflow.enabled
                       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                       : "bg-slate-50 text-slate-500 border-slate-200",
                   )}
@@ -3356,6 +3486,16 @@ function WorkflowTypesAdmin({
                 >
                   Redaguoti
                 </button>
+                {!workflow.archivedAt && (
+                  <button
+                    type="button"
+                    onClick={() => archiveWorkflow(workflow)}
+                    className="px-3 py-2 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-black hover:bg-amber-100"
+                    title="Archyvuoti"
+                  >
+                    <Archive size={15} />
+                  </button>
+                )}
               </div>
             </div>
           );

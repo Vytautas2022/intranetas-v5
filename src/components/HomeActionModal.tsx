@@ -49,7 +49,8 @@ export const HomeActionModal: React.FC<HomeActionModalProps> = ({
     .map((category) => ({
       name: categoryLabels[category] || category,
       items: visibleWorkflows.filter(
-        (workflow) => workflow.enabled && workflow.category === category,
+        (workflow) =>
+          workflow.enabled && !workflow.archivedAt && workflow.category === category,
       ),
     }))
     .filter((group) => group.items.length > 0);

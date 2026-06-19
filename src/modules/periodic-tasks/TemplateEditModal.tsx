@@ -57,7 +57,10 @@ export const TemplateEditModal: React.FC<TemplateEditModalProps> = ({
   const enabledWorkflows = useMemo(
     () =>
       workflowTypes
-        .filter((wf) => wf.enabled !== false && wf.active !== false)
+        .filter(
+          (wf) =>
+            wf.enabled !== false && wf.active !== false && !wf.archivedAt,
+        )
         .sort((a, b) => a.name.localeCompare(b.name)),
     [],
   );

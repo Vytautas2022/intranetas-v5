@@ -41,6 +41,9 @@ export interface WorkflowType {
   moduleId?: string;
   label?: string;
   active?: boolean;
+  archivedAt?: number;
+  archivedBy?: string;
+  archiveReason?: string;
   order?: number;
   permissionKey?: string;
   submoduleKey?: string;

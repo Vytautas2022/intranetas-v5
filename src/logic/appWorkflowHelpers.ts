@@ -50,7 +50,8 @@ const getActiveWorkflowById = (
     ? workflowTypes.find(
         (workflow) =>
           workflow.id === workflowTypeId &&
-          Boolean(workflow.active ?? workflow.enabled),
+          Boolean(workflow.active ?? workflow.enabled) &&
+          !workflow.archivedAt,
       )
     : undefined;
 
@@ -62,7 +63,8 @@ const getActiveWorkflowByLegacyCategory = (
     ? workflowTypes.find(
         (workflow) =>
           workflow.legacyCategory === legacyCategory &&
-          Boolean(workflow.active ?? workflow.enabled),
+          Boolean(workflow.active ?? workflow.enabled) &&
+          !workflow.archivedAt,
       )
     : undefined;
 
@@ -353,6 +355,7 @@ export const getActiveDarbaiWorkflowIds = (
   workflowTypes
     .filter((workflow) => {
       if (!workflow.enabled) return false;
+      if (workflow.archivedAt) return false;
       if (currentUser && !canViewWorkflowResolver(currentUser, workflow)) {
         return false;
       }
@@ -382,7 +385,12 @@ export const getActiveWorkflowTypesForModule = (
       const moduleMatches =
         moduleId === "darbai" || workflow.moduleId === moduleId;
       const active = workflow.active ?? workflow.enabled;
-      return moduleMatches && active && canViewWorkflowType(workflow, currentUser);
+      return (
+        moduleMatches &&
+        active &&
+        !workflow.archivedAt &&
+        canViewWorkflowType(workflow, currentUser)
+      );
     })
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
 };

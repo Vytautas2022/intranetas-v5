@@ -42,7 +42,7 @@ const getQrObjectType = (input: QrReportInput): WorkflowObjectType => {
 };
 
 const isWorkflowEnabled = (workflow: WorkflowType): boolean =>
-  Boolean(workflow.active ?? workflow.enabled);
+  Boolean(workflow.active ?? workflow.enabled) && !workflow.archivedAt;
 
 export const getQrWorkflow = (
   input: QrReportInput,

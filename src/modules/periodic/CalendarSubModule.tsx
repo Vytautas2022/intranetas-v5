@@ -1495,7 +1495,10 @@ const TemplateEditModalImproved = ({
   const activeWorkflowTypes = useMemo(
     () =>
       workflowTypes
-        .filter((workflow) => Boolean(workflow.active ?? workflow.enabled))
+        .filter(
+          (workflow) =>
+            Boolean(workflow.active ?? workflow.enabled) && !workflow.archivedAt,
+        )
         .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)),
     [workflowTypes],
   );
