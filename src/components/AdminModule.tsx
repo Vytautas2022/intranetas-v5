@@ -34,6 +34,11 @@ import { cn } from "../lib/utils";
 import { getProductAnalytics } from "../logic/inventoryLogic";
 import { generateUniqueId } from "../logic/idLogic";
 import {
+  enforceSystemOwnerUser,
+  isSystemOwnerUser,
+  SUPER_ADMIN_ROLE_ID,
+} from "../logic/systemOwner";
+import {
   canAccessAdminTabResolver,
   compareLegacyVsResolverActionAccess,
   compareLegacyVsResolverAccess,
@@ -122,6 +127,7 @@ interface AdminModuleProps {
   orders: any[];
   workflowTypes?: WorkflowType[];
   setWorkflowTypes?: React.Dispatch<React.SetStateAction<WorkflowType[]>>;
+  onResetTestEnvironment?: () => void;
   renderPeriodicModule?: () => React.ReactNode;
   activeTab?: AdminModuleTabId;
   onTabChange?: (tab: AdminModuleTabId) => void;
@@ -288,6 +294,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   orders,
   workflowTypes = initialWorkflowTypes,
   setWorkflowTypes,
+  onResetTestEnvironment,
   renderPeriodicModule,
   inventorySubTab,
   onSubTabChange,
@@ -347,6 +354,34 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     setPermissionObjectScopes(defaults.objectScopes);
     setPermissionTenantScopes(defaults.tenantScopes);
     setPermissionAdminRights(defaults.adminRights);
+  };
+
+  const handleResetWorkflowTestEnvironment = () => {
+    const confirmed = window.confirm(
+      [
+        "Bus ištrinta visa testinė workflow aplinka.",
+        "",
+        "Ištrinama:",
+        "- Workflow Types",
+        "- Workflow Cards",
+        "- Workflow Forms",
+        "- Workflow Permissions",
+        "- Periodic Templates",
+        "- Periodic Instances",
+        "- Periodic History",
+        "",
+        "Users, Roles, Clubs ir Turtas nebus trinami.",
+      ].join("\n"),
+    );
+
+    if (!confirmed) return;
+
+    setPermissionWorkflowAccess([]);
+    saveMockPermissionConfig({
+      ...permissionPreviewConfig,
+      workflowAccess: [],
+    });
+    onResetTestEnvironment?.();
   };
   const legacyPeriodicTemplatesRoute = getAdminTabRoutePath("periodic_templates");
   const isLegacyPeriodicTemplatesRoute = Boolean(
@@ -631,6 +666,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             cards={tasks}
             orders={orders}
             periodicTemplates={periodicTemplates}
+            workflowAccess={permissionWorkflowAccess}
+            onResetTestEnvironment={handleResetWorkflowTestEnvironment}
             currentUser={currentUser}
           />
         )}
@@ -3152,6 +3189,8 @@ function WorkflowTypesAdmin({
   cards,
   orders,
   periodicTemplates,
+  workflowAccess,
+  onResetTestEnvironment,
   currentUser,
 }: {
   workflows: WorkflowType[];
@@ -3161,9 +3200,13 @@ function WorkflowTypesAdmin({
   cards: any[];
   orders: any[];
   periodicTemplates: any[];
+  workflowAccess: WorkflowAccessPermission[];
+  onResetTestEnvironment?: () => void;
   currentUser?: AuthUser | null;
 }) {
   const [editing, setEditing] = useState<WorkflowType | null>(null);
+  const [pendingDeleteWorkflow, setPendingDeleteWorkflow] =
+    useState<WorkflowType | null>(null);
   const [workflowArchiveFilter, setWorkflowArchiveFilter] = useState<
     "active" | "archive"
   >("active");
@@ -3193,9 +3236,12 @@ function WorkflowTypesAdmin({
         cards: [...cards, ...orders].filter(matchesWorkflowId).length,
         periodic: periodicTemplates.filter(matchesWorkflowId).length,
         registrationForms: workflow.requiredFields?.length ? 1 : 0,
+        permissionReferences: workflowAccess.filter(
+          (access) => access.workflowTypeId === workflow.id,
+        ).length,
       };
     },
-    [cards, orders, periodicTemplates],
+    [cards, orders, periodicTemplates, workflowAccess],
   );
 
   const archiveWorkflow = (workflow: WorkflowType) => {
@@ -3231,6 +3277,44 @@ function WorkflowTypesAdmin({
           : item,
       ),
     );
+  };
+
+  const requestDeleteWorkflow = (workflow: WorkflowType) => {
+    const usage = getWorkflowUsage(workflow);
+    if (
+      usage.cards > 0 ||
+      usage.periodic > 0 ||
+      usage.registrationForms > 0 ||
+      usage.permissionReferences > 0
+    ) {
+      window.alert(
+        [
+          "Negalima ištrinti workflow.",
+          "",
+          "Naudojamas sistemoje:",
+          "",
+          `Kortelės: ${usage.cards}`,
+          `Periodiniai: ${usage.periodic}`,
+          `Registracijos: ${usage.registrationForms}`,
+          `Teisės: ${usage.permissionReferences}`,
+        ].join("\n"),
+      );
+      return;
+    }
+
+    setPendingDeleteWorkflow(workflow);
+  };
+
+  const confirmDeleteWorkflow = () => {
+    if (!pendingDeleteWorkflow || !setWorkflows) return;
+
+    setWorkflows(
+      workflows.filter((workflow) => workflow.id !== pendingDeleteWorkflow.id),
+    );
+    if (editing?.id === pendingDeleteWorkflow.id) {
+      setEditing(null);
+    }
+    setPendingDeleteWorkflow(null);
   };
 
   const saveWorkflow = () => {
@@ -3345,6 +3429,13 @@ function WorkflowTypesAdmin({
           >
             <Plus size={16} /> Sukurti workflow
           </button>
+          <button
+            type="button"
+            onClick={onResetTestEnvironment}
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-xl font-bold hover:bg-red-100 text-sm"
+          >
+            <RefreshCw size={16} /> Reset Test Environment
+          </button>
         </div>
       </div>
 
@@ -3398,7 +3489,7 @@ function WorkflowTypesAdmin({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-[10px] font-black">
+              <div className="grid grid-cols-4 gap-2 text-[10px] font-black">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <span className="block text-slate-400 uppercase">Kortelės</span>
                   {usage.cards}
@@ -3410,6 +3501,10 @@ function WorkflowTypesAdmin({
                 <div className="rounded-xl bg-slate-50 p-2">
                   <span className="block text-slate-400 uppercase">Formos</span>
                   {usage.registrationForms}
+                </div>
+                <div className="rounded-xl bg-slate-50 p-2">
+                  <span className="block text-slate-400 uppercase">Teisės</span>
+                  {usage.permissionReferences}
                 </div>
               </div>
 
@@ -3496,11 +3591,54 @@ function WorkflowTypesAdmin({
                     <Archive size={15} />
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => requestDeleteWorkflow(workflow)}
+                  className="px-3 py-2 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-black hover:bg-red-100"
+                  title="Ištrinti"
+                >
+                  <Trash2 size={15} />
+                </button>
               </div>
             </div>
           );
         })}
       </div>
+
+      <AdminModal
+        title="Ištrinti workflow"
+        isOpen={Boolean(pendingDeleteWorkflow)}
+        onClose={() => setPendingDeleteWorkflow(null)}
+      >
+        {pendingDeleteWorkflow && (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-red-50 border border-red-100 p-4">
+              <p className="text-sm font-black text-red-900">
+                Tikrai ištrinti workflow?
+              </p>
+              <p className="text-xs font-semibold text-red-700 mt-1">
+                {pendingDeleteWorkflow.name}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteWorkflow(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-black hover:bg-slate-200"
+              >
+                Atšaukti
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteWorkflow}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-black hover:bg-red-700"
+              >
+                Ištrinti
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminModal>
 
       <AdminModal
         title="Workflow konfiguracija"
@@ -4582,6 +4720,8 @@ function UsersAdmin({
     resolveUserAssignedRoles({ role: roleName as User["role"] }, permissionRoles)[0]
       ?.id;
   const toggleAssignedRole = (roleId: string) => {
+    if (isSystemOwnerUser(editing as User)) return;
+
     const currentRoleIds = getAssignedRoleIds(editing);
     const nextRoleIds = currentRoleIds.includes(roleId)
       ? currentRoleIds.filter((id) => id !== roleId)
@@ -4616,14 +4756,26 @@ function UsersAdmin({
     },
   ];
 
-  const archiveUser = (userId: string, isActive: boolean) =>
+  const archiveUser = (userId: string, isActive: boolean) => {
+    const user = users.find((candidate) => candidate.id === userId);
+    if (isSystemOwnerUser(user)) {
+      alert("Negalima pašalinti sistemos savininko.");
+      return;
+    }
+
     setUsers(
       users.map((user) =>
         user.id === userId ? { ...user, is_active: isActive } : user,
       ),
     );
+  };
 
   const deleteUser = (user: User) => {
+    if (isSystemOwnerUser(user)) {
+      alert("Negalima pašalinti sistemos savininko.");
+      return;
+    }
+
     const dependencies = getUserDependencies(user);
     if (dependencies.some((dependency) => dependency.count > 0)) {
       alert(formatDependencyBlockMessage(dependencies));
@@ -4668,20 +4820,26 @@ function UsersAdmin({
     if (editing.id) {
       const existingUser = users.find((c) => c.id === editing.id);
       if (existingUser) {
+        const nextUser = isSystemOwnerUser(existingUser)
+          ? enforceSystemOwnerUser({
+              ...existingUser,
+              ...editing,
+              email: normalizedEmail,
+            } as User)
+          : ({
+              ...existingUser,
+              ...editing,
+              email: normalizedEmail,
+              role: normalizedRole,
+              assignedRoleIds,
+              assignedRegionIds,
+              assignedClubIds,
+              assigned_clubs: assignedClubIds,
+            } as User);
+
         setUsers(
           users.map((c) =>
-            c.id === editing.id
-              ? ({
-                  ...c,
-                  ...editing,
-                  email: normalizedEmail,
-                  role: normalizedRole,
-                  assignedRoleIds,
-                  assignedRegionIds,
-                  assignedClubIds,
-                  assigned_clubs: assignedClubIds,
-                } as User)
-              : c,
+            c.id === editing.id ? nextUser : c,
           ),
         );
         createAuditLogEntry({
@@ -4695,9 +4853,9 @@ function UsersAdmin({
           locationLabel: "Sistemos administravimas > Vartotojai",
           canRestore: true,
           oldValue: existingUser,
-          newValue: { ...existingUser, ...editing },
+          newValue: nextUser,
           snapshotBefore: existingUser,
-          snapshotAfter: { ...existingUser, ...editing }
+          snapshotAfter: nextUser
         });
       } else {
         const newUser = {
@@ -4809,7 +4967,16 @@ function UsersAdmin({
                   key={user.id}
                   className="border-b border-slate-100 hover:bg-slate-50"
                 >
-                  <td className="py-4 font-semibold">{user.name}</td>
+                  <td className="py-4 font-semibold">
+                    <div className="flex flex-col gap-1">
+                      <span>{user.name}</span>
+                      {isSystemOwnerUser(user) && (
+                        <span className="w-fit rounded-full bg-black px-2 py-0.5 text-[9px] font-black uppercase text-white">
+                          Sistemos savininkas
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="py-4 text-xs text-slate-500">{user.email}</td>
                   <td className="py-4">
                     <div className="flex max-w-[220px] flex-wrap gap-1.5">
@@ -4877,10 +5044,26 @@ function UsersAdmin({
                         </button>
                         <button
                           onClick={() => archiveUser(user.id, false)}
-                          className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg"
+                          disabled={isSystemOwnerUser(user)}
+                          className="px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
+                          title={
+                            isSystemOwnerUser(user)
+                              ? "Negalima pašalinti sistemos savininko."
+                              : "Archyvuoti"
+                          }
                         >
                           Archyvuoti
                         </button>
+                        {isSystemOwnerUser(user) && (
+                          <button
+                            type="button"
+                            disabled
+                            className="p-2 text-rose-500 bg-rose-50 rounded-lg cursor-not-allowed opacity-50"
+                            title="Negalima pašalinti sistemos savininko."
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </>
                     ) : (
                       <>
@@ -4892,7 +5075,8 @@ function UsersAdmin({
                         </button>
                         <button
                           onClick={() => deleteUser(user)}
-                          className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"
+                          disabled={isSystemOwnerUser(user)}
+                          className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                           title="Ištrinti"
                         >
                           <Trash2 size={16} />
@@ -4925,6 +5109,11 @@ function UsersAdmin({
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="font-bold text-slate-900">{user.name}</h3>
+                {isSystemOwnerUser(user) && (
+                  <span className="mt-1 inline-block rounded-full bg-black px-2 py-0.5 text-[9px] font-black uppercase text-white">
+                    Sistemos savininkas
+                  </span>
+                )}
                 <p className="text-xs text-slate-500 mt-0.5">{user.email}</p>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {getAssignedPermissionRoles(user).length ? (
@@ -4992,10 +5181,21 @@ function UsersAdmin({
                   </button>
                   <button
                     onClick={() => archiveUser(user.id, false)}
-                    className="flex-1 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold"
+                    disabled={isSystemOwnerUser(user)}
+                    className="flex-1 py-2 bg-amber-50 text-amber-700 rounded-lg text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Archyvuoti
                   </button>
+                  {isSystemOwnerUser(user) && (
+                    <button
+                      type="button"
+                      disabled
+                      className="px-3 py-2 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold cursor-not-allowed opacity-50"
+                      title="Negalima pašalinti sistemos savininko."
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </>
               ) : (
                 <>
@@ -5007,7 +5207,8 @@ function UsersAdmin({
                   </button>
                   <button
                     onClick={() => deleteUser(user)}
-                    className="flex-1 py-2 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold"
+                    disabled={isSystemOwnerUser(user)}
+                    className="flex-1 py-2 bg-rose-50 text-rose-700 rounded-lg text-xs font-bold disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Delete
                   </button>
@@ -5072,6 +5273,7 @@ function UsersAdmin({
             </label>
             <select
               value={editing.role || "OPS"}
+              disabled={isSystemOwnerUser(editing as User)}
               onChange={(e) => {
                 const nextRole = e.target.value as User["role"];
                 const nextRoleId = getRoleIdByName(nextRole);
@@ -5085,8 +5287,11 @@ function UsersAdmin({
                       : currentAssignedRoleIds,
                 });
               }}
-              className="w-full p-2 border border-slate-200 rounded-lg"
+              className="w-full p-2 border border-slate-200 rounded-lg disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
             >
+              {isSystemOwnerUser(editing as User) && (
+                <option value="SYSTEM_OWNER">SYSTEM_OWNER</option>
+              )}
               {ROLES.map((r, index) => (
                 <option key={r} value={r}>
                   {r}
@@ -5102,11 +5307,19 @@ function UsersAdmin({
               {permissionRoles.map((role) => (
                 <label
                   key={role.id}
-                  className="flex items-start gap-2 p-2 hover:bg-slate-100 rounded cursor-pointer"
+                  className={cn(
+                    "flex items-start gap-2 p-2 hover:bg-slate-100 rounded cursor-pointer",
+                    isSystemOwnerUser(editing as User) && "cursor-not-allowed opacity-60",
+                  )}
                 >
                   <input
                     type="checkbox"
-                    checked={getAssignedRoleIds(editing).includes(role.id)}
+                    checked={
+                      isSystemOwnerUser(editing as User) && role.id === SUPER_ADMIN_ROLE_ID
+                        ? true
+                        : getAssignedRoleIds(editing).includes(role.id)
+                    }
+                    disabled={isSystemOwnerUser(editing as User)}
                     onChange={() => toggleAssignedRole(role.id)}
                     className="mt-0.5 w-4 h-4 text-brand-lime rounded border-slate-300"
                   />

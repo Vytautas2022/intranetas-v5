@@ -11,7 +11,7 @@ import {
   useLocation,
 } from "react-router-dom";
 
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   Menu,
   Plus,
@@ -167,6 +167,7 @@ import {
   canEditWorkflowCardPreview,
 } from "./logic/permissionPreviewResolver";
 import { getAssignableUsersForClub } from "./logic/userScopeLogic";
+import { ensureSystemOwner } from "./logic/systemOwner";
 
 import { cn } from "./lib/utils";
 import { HomeActionModal } from "./components/HomeActionModal";
@@ -3814,14 +3815,31 @@ function MainApp() {
     [appClubs],
   );
   const [appUsers, setAppUsers] = useState<User[]>(() => {
-    return hydrateMockCollection("app_users", users, {
+    return ensureSystemOwner(hydrateMockCollection("app_users", users, {
       mergeSeed: true,
       getKey: (user) => user.email?.trim().toLowerCase() || user.id,
-    });
+    }));
   });
 
+  const setProtectedAppUsers = useCallback<React.Dispatch<React.SetStateAction<User[]>>>(
+    (nextUsers) => {
+      setAppUsers((previousUsers) =>
+        ensureSystemOwner(
+          typeof nextUsers === "function" ? nextUsers(previousUsers) : nextUsers,
+        ),
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
-    writeMockStorage("app_users", appUsers);
+    const protectedUsers = ensureSystemOwner(appUsers);
+    if (protectedUsers !== appUsers) {
+      setAppUsers(protectedUsers);
+      return;
+    }
+
+    writeMockStorage("app_users", protectedUsers);
   }, [appUsers]);
   const getScopedAssigneesForClub = (clubId?: string): User[] => {
     const club = appClubs.find((candidate) => candidate.id === clubId);
@@ -4463,6 +4481,27 @@ function MainApp() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDetailPanelOpen, setIsDetailPanelOpen] = useState(false);
   const [selectedFault, setSelectedFault] = useState<Fault | null>(null);
+
+  const resetWorkflowTestEnvironment = useCallback(() => {
+    updateWorkflowTypes([]);
+    setFaults([]);
+    setTasks([]);
+    setOrders([]);
+    setAppPeriodicTemplates([]);
+    setClubTaskConfigs([]);
+    setPeriodicHistory([]);
+    setSelectedWorkflowTypeIds([]);
+    setSelectedFault(null);
+    setIsDetailPanelOpen(false);
+
+    saveToStorage(KEYS.WORKFLOW_TYPES, []);
+    writeMockStorage(KEYS.FAULTS, []);
+    writeMockStorage(KEYS.TASKS, []);
+    saveToStorage(KEYS.ORDERS, []);
+    writeMockStorage(KEYS.PERIODIC_TEMPLATES, []);
+    saveToStorage(KEYS.PERIODIC_HISTORY, []);
+    saveToStorage(KEYS.PERIODIC_INSTANCES, []);
+  }, [updateWorkflowTypes]);
   const [commentText, setCommentText] = useState("");
   const [rejectReason, setRejectReason] = useState("");
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
@@ -6810,7 +6849,7 @@ ${task.updatedBy}
               clubs={adminDB.clubs}
               setClubs={setAppClubs}
               users={adminDB.users}
-              setUsers={setAppUsers}
+              setUsers={setProtectedAppUsers}
               cities={adminDB.cities}
               setCities={setAppCities}
               facilityTemplates={adminDB.facilityTemplates}
@@ -6825,6 +6864,7 @@ ${task.updatedBy}
               orders={orders}
               workflowTypes={workflowTypes}
               setWorkflowTypes={updateWorkflowTypes}
+              onResetTestEnvironment={resetWorkflowTestEnvironment}
               renderPeriodicModule={() => (
                 <PeriodicModule
                   faults={[...faults, ...tasks]}
@@ -7414,7 +7454,7 @@ ${task.updatedBy}
                           clubs={adminDB.clubs}
                           setClubs={setAppClubs}
                           users={adminDB.users}
-                          setUsers={setAppUsers}
+                          setUsers={setProtectedAppUsers}
                           cities={adminDB.cities}
                           setCities={setAppCities}
                           facilityTemplates={adminDB.facilityTemplates}
@@ -7429,6 +7469,7 @@ ${task.updatedBy}
                           orders={orders}
                           workflowTypes={workflowTypes}
                           setWorkflowTypes={updateWorkflowTypes}
+                          onResetTestEnvironment={resetWorkflowTestEnvironment}
                           renderPeriodicModule={() => (
                             <PeriodicModule
                               faults={[...faults, ...tasks]}
