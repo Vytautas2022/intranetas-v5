@@ -4,6 +4,7 @@ import { createHistoryItem, addHistoryItem } from './historyLogic';
 import type { AuthUser } from '../auth/types';
 import { canApproveWorkflowItemPreview } from './permissionPreviewResolver';
 import { resolveAssignee } from './assignmentLogic';
+import { getOrderWorkflowModuleId, getOrderWorkflowTypeId } from './workflowPurpose';
 
 /**
  * Creates a new order in DRAFT status.
@@ -145,10 +146,15 @@ export const canUserApprove = (
   order: Order,
   user: Pick<AuthUser, "id" | "role" | "assignedRoleIds" | "effectiveRoles" | "effectivePermissionsPreview">,
 ): boolean => {
+  const workflowTypeId = getOrderWorkflowTypeId();
+  const moduleId = getOrderWorkflowModuleId();
+
   if (
+    !workflowTypeId ||
+    !moduleId ||
     !canApproveWorkflowItemPreview(user, {
-      workflowTypeId: "orders",
-      moduleId: "orders",
+      workflowTypeId,
+      moduleId,
       type: "ORDER",
     })
   ) return false;

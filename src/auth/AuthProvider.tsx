@@ -13,6 +13,7 @@ import {
   resolveEffectivePermissionPreview,
 } from "../logic/permissionPreviewResolver";
 import { readMockStorage, writeMockStorage } from "../logic/mockDbHydration";
+import { ensureSystemOwner } from "../logic/systemOwner";
 
 const AUTH_STORAGE_KEY = "sg_auth_user_id";
 const SYSTEM_USERS_STORAGE_KEY = "app_users";
@@ -146,7 +147,7 @@ const mergeUsers = (seedUsers: User[], savedUsers: SystemUserRecord[]) => {
     merged.set(key, user);
   });
 
-  return Array.from(merged.values());
+  return ensureSystemOwner(Array.from(merged.values()));
 };
 
 const getSavedUserById = (storedId: string): SystemUserRecord | null => {
@@ -398,6 +399,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(
     findStoredUser,
   );
+  const [impersonatedUser, setImpersonatedUser] = useState<AuthUser | null>(null);
 
   const login = useCallback(
     async (email: string, password: string, remember: boolean) => {
@@ -552,14 +554,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const value = useMemo(
-    () => ({
-      currentUser,
-      isAuthenticated: Boolean(currentUser),
-      login,
-      loginWithGoogleCredential,
-      logout,
-    }),
-    [currentUser, login, loginWithGoogleCredential, logout],
+    () => {
+      const effectiveUser =
+        import.meta.env.DEV && impersonatedUser ? impersonatedUser : currentUser;
+      return {
+        currentUser: effectiveUser,
+        isAuthenticated: Boolean(effectiveUser),
+        login,
+        loginWithGoogleCredential,
+        logout,
+        ...(import.meta.env.DEV
+          ? {
+              impersonatedUser,
+              switchDevUser: (user: AuthUser) => setImpersonatedUser(user),
+              clearDevUser: () => setImpersonatedUser(null),
+            }
+          : {}),
+      };
+    },
+    [currentUser, impersonatedUser, login, loginWithGoogleCredential, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

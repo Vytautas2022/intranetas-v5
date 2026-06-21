@@ -16,6 +16,14 @@ import { assetTypes } from "./assetTypes";
 export type WorkflowCategory = "DARBAI" | "KONTROLE" | "UZSAKYMAI" | "IDEJOS";
 export type WorkflowObjectType = "EQUIPMENT" | "FACILITY" | "ORDER" | "GENERIC";
 export type WorkflowQrMode = "OFF" | "GENERIC" | "ASSET_BASED";
+export type WorkflowScope = "GLOBAL" | "REGION" | "CLUB";
+export type WorkflowPurpose =
+  | "FAULTS"
+  | "TASKS"
+  | "ORDERS"
+  | "PERIODIC"
+  | "PROJECTS"
+  | "SUGGESTIONS";
 
 export interface WorkflowStatusConfig {
   id: string;
@@ -60,6 +68,11 @@ export interface WorkflowType {
   assetTypeId: string | null;
   qrMode: WorkflowQrMode;
   usesScope: boolean;
+  workflowScope?: WorkflowScope;
+  usesClub?: boolean;
+  usesAsset?: boolean;
+  usesSla?: boolean;
+  workflowPurpose?: WorkflowPurpose;
   ownerUserId: string | null;
   category: WorkflowCategory;
   statuses: WorkflowStatusConfig[];
@@ -132,6 +145,11 @@ const baseWorkflow = {
   assetTypeId: null,
   qrMode: "OFF" as const,
   usesScope: false,
+  workflowScope: "GLOBAL" as const,
+  usesClub: false,
+  usesAsset: false,
+  usesSla: true,
+  workflowPurpose: "TASKS" as const,
   ownerUserId: null,
   priorities: defaultPriorities,
   slaRules: { defaultHours: 48, criticalHours: 6, warningRatio: 0.8 },
@@ -181,6 +199,11 @@ export const workflowTypes: WorkflowType[] = [
     assetTypeId: assetTypeIds.facility,
     qrMode: "ASSET_BASED",
     usesScope: true,
+    workflowScope: "GLOBAL",
+    usesClub: true,
+    usesAsset: true,
+    usesSla: true,
+    workflowPurpose: "FAULTS",
     ownerUserId: "u3",
     category: "DARBAI",
     requiredFields: [
@@ -211,6 +234,11 @@ export const workflowTypes: WorkflowType[] = [
     assetTypeId: assetTypeIds.equipment,
     qrMode: "ASSET_BASED",
     usesScope: true,
+    workflowScope: "GLOBAL",
+    usesClub: true,
+    usesAsset: true,
+    usesSla: true,
+    workflowPurpose: "FAULTS",
     ownerUserId: "u3",
     category: "DARBAI",
     requiredFields: [
@@ -220,52 +248,6 @@ export const workflowTypes: WorkflowType[] = [
       { id: "description", label: "Aprašymas", type: "textarea", required: true },
     ],
     linkedConfigs: { equipmentIssueTypes: true, sops: true },
-  },
-  {
-    ...baseWorkflow,
-    id: "it-work",
-    moduleId: "darbai",
-    label: "IT darbai",
-    active: true,
-    order: 30,
-    legacyCategory: "IT",
-    action: "other",
-    name: "IT darbai",
-    description: "Sistemos, įranga, prieigos ir IT užklausos",
-    icon: "Monitor",
-    color: "text-sky-600",
-    bg: "bg-sky-50",
-    hover: "hover:border-sky-200",
-    enabled: true,
-    category: "DARBAI",
-    requiredFields: [
-      { id: "clubId", label: "Sporto klubas", type: "club", required: true },
-      { id: "description", label: "Aprašymas", type: "textarea", required: true },
-    ],
-    linkedConfigs: {},
-  },
-  {
-    ...baseWorkflow,
-    id: "marketing-work",
-    moduleId: "darbai",
-    label: "Marketing darbai",
-    active: true,
-    order: 40,
-    legacyCategory: "MARKETING",
-    action: "other",
-    name: "Marketing darbai",
-    description: "Kampanijos, vizualai ir marketingo užduotys",
-    icon: "FileText",
-    color: "text-fuchsia-600",
-    bg: "bg-fuchsia-50",
-    hover: "hover:border-fuchsia-200",
-    enabled: true,
-    category: "DARBAI",
-    requiredFields: [
-      { id: "clubId", label: "Sporto klubas", type: "club", required: true },
-      { id: "description", label: "Aprašymas", type: "textarea", required: true },
-    ],
-    linkedConfigs: {},
   },
   {
     ...baseWorkflow,
@@ -283,34 +265,16 @@ export const workflowTypes: WorkflowType[] = [
     bg: "bg-emerald-50",
     hover: "hover:border-emerald-200",
     enabled: true,
+    workflowScope: "GLOBAL",
+    usesClub: false,
+    usesAsset: false,
+    usesSla: false,
+    workflowPurpose: "TASKS",
     category: "DARBAI",
     requiredFields: [
       { id: "description", label: "Aprašymas", type: "textarea", required: true },
     ],
     linkedConfigs: { sops: true },
-  },
-  {
-    ...baseWorkflow,
-    id: "video-control",
-    moduleId: "kontrole",
-    label: "Vaizdo kontrolė",
-    active: true,
-    order: 60,
-    legacyCategory: "VIDEO_CONTROL",
-    action: "other",
-    name: "Vaizdo kontrolė",
-    description: "Vaizdo peržiūros, incidentai ir kontrolės užduotys",
-    icon: "Camera",
-    color: "text-indigo-600",
-    bg: "bg-indigo-50",
-    hover: "hover:border-indigo-200",
-    enabled: true,
-    category: "KONTROLE",
-    requiredFields: [
-      { id: "clubId", label: "Sporto klubas", type: "club", required: true },
-      { id: "description", label: "Aprašymas", type: "textarea", required: true },
-    ],
-    linkedConfigs: {},
   },
   {
     ...baseWorkflow,
@@ -332,6 +296,11 @@ export const workflowTypes: WorkflowType[] = [
     assetTypeId: assetTypeIds.orders,
     qrMode: "OFF",
     usesScope: true,
+    workflowScope: "GLOBAL",
+    usesClub: true,
+    usesAsset: false,
+    usesSla: false,
+    workflowPurpose: "ORDERS",
     ownerUserId: null,
     category: "UZSAKYMAI",
     assignmentRules: { strategy: "supplier", defaultRole: "OPS" },
@@ -357,6 +326,11 @@ export const workflowTypes: WorkflowType[] = [
     bg: "bg-amber-50",
     hover: "hover:border-amber-200",
     enabled: true,
+    workflowScope: "GLOBAL",
+    usesClub: false,
+    usesAsset: false,
+    usesSla: false,
+    workflowPurpose: "SUGGESTIONS",
     category: "IDEJOS",
     requiredFields: [
       { id: "description", label: "Aprašymas", type: "textarea", required: true },

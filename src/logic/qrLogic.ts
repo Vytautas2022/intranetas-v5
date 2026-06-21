@@ -16,6 +16,7 @@ import {
 } from './facilityFaultIdentity';
 import { getSlaDeadline } from './slaEngine';
 import type { WorkflowObjectType, WorkflowType } from '../mock-db/workflowTypes';
+import { equipmentIssueTypesList } from '../mock-db/admin';
 
 const adminEquipment = getEquipmentAssetObjects();
 const facilityObjects = getFacilityAssetObjects();
@@ -24,6 +25,8 @@ export interface QrReportInput {
   equipment_id?: string;
   location_id?: string;
   comment: string;
+  issue_type_id?: string;
+  media?: { type: "image" | "video"; url: string; name: string }[];
 }
 
 export interface QrReportResult {
@@ -202,12 +205,23 @@ export function handleQrReport(
 
   const club = clubs.find(c => c.id === clubId);
   const clubName = club ? club.name : clubId;
-  const assetIssueType =
-    workflow.qrMode === "ASSET_BASED" && workflow.objectType === "EQUIPMENT"
-      ? getDefaultEquipmentIssueTypeForQr()
-      : workflow.qrMode === "ASSET_BASED" && workflow.objectType === "FACILITY"
-        ? getDefaultFacilityIssueTypeForQr()
-        : null;
+  const resolveAssetIssueType = () => {
+    if (workflow.qrMode !== "ASSET_BASED") return null;
+    if (workflow.objectType === "EQUIPMENT") {
+      if (input.issue_type_id) {
+        const found = equipmentIssueTypesList.find(
+          (i) => i.id === input.issue_type_id && i.applies_to !== "FACILITY",
+        );
+        if (found) return found;
+      }
+      return getDefaultEquipmentIssueTypeForQr();
+    }
+    if (workflow.objectType === "FACILITY") {
+      return getDefaultFacilityIssueTypeForQr();
+    }
+    return null;
+  };
+  const assetIssueType = resolveAssetIssueType();
 
   if (
     workflow.qrMode === "ASSET_BASED" &&
@@ -258,7 +272,7 @@ export function handleQrReport(
     slaDeadline: getSlaDeadline({ createdAt: now, slaHours }),
     assignedTo: 'Nepriskirta',
     comments: [],
-    media: [],
+    media: input.media ?? [],
     watchers: [],
     rejected: false,
     rejectReason: '',

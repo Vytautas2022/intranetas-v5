@@ -351,7 +351,7 @@ export const adaptPeriodicTaskTemplateToPeriodicTemplate = (
   frequency: template.recurrence,
   recurrence: template.recurrence,
   type: template.type === "INSPECTION" ? "OPTIONAL" : "MANDATORY",
-  destinationType: template.targetSubmodule === "UZSAKYMAI" ? "ORDER" : "WORKFLOW_CARD",
+  destinationType: resolvePeriodicDestinationType(template as any),
   destinationWorkflowTypeId: template.destinationWorkflowTypeId,
   assignmentStrategy: template.assigned_to
     ? "TEMPLATE_ASSIGNEE"

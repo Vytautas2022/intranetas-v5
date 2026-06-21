@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -23,10 +23,13 @@ import {
   RotateCcw as History,
   RefreshCw,
   FileText,
+  Info,
   ShieldCheck,
   Workflow,
+  Upload,
 } from "lucide-react";
 import { AuditAdmin } from "./AuditAdmin";
+import { AssetImportModal } from "./AssetImportModal";
 import { useAuth } from "../auth/authContext";
 import type { AuthUser } from "../auth/types";
 import { createAuditLogEntry } from "../logic/auditLogic";
@@ -99,6 +102,7 @@ import {
   moduleRegistry,
   type AdminModuleTabId,
 } from "../modules/moduleRegistry";
+import { KEYS, loadFromStorage, saveToStorage } from "../services/persistenceService";
 
 interface AdminModuleProps {
   products: Product[];
@@ -239,6 +243,48 @@ type LifecycleDependency = {
   count: number;
 };
 
+const WorkflowFieldHelp = ({
+  label,
+  details,
+}: {
+  label: string;
+  details: string;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] font-black uppercase text-slate-400">
+        {label}
+      </span>
+      <span className="relative inline-flex">
+        <button
+          type="button"
+          aria-label={`${label} informacija`}
+          aria-expanded={isOpen}
+          onMouseEnter={() => setIsOpen(true)}
+          onMouseLeave={() => setIsOpen(false)}
+          onFocus={() => setIsOpen(true)}
+          onBlur={() => setIsOpen(false)}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setIsOpen(true);
+          }}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus:bg-slate-100 focus:text-slate-700 focus:outline-none"
+        >
+          <Info size={14} />
+        </button>
+        {isOpen && (
+          <span className="pointer-events-none absolute left-1/2 top-6 z-50 w-72 -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-3 text-left text-xs font-semibold normal-case leading-relaxed text-slate-600 shadow-xl">
+            {details}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+};
+
 const formatDependencyBlockMessage = (dependencies: LifecycleDependency[]) => {
   const found = dependencies.filter((dependency) => dependency.count > 0);
 
@@ -322,8 +368,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     AdminRightsPermission[]
   >(initialPermissionConfig.adminRights);
   const [assetTypes, setAssetTypes] = useState<AssetType[]>(initialAssetTypes);
-  const [assetObjects, setAssetObjects] =
-    useState<AssetObject[]>(initialAssetObjects);
+  const [assetObjects, setAssetObjects] = useState<AssetObject[]>(() =>
+    loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects),
+  );
   const [assetIssueTypes, setAssetIssueTypes] =
     useState<AssetIssueType[]>(initialAssetIssueTypes);
   const permissionPreviewConfig: PermissionPreviewConfig = {
@@ -345,6 +392,10 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
     permissionTenantScopes,
     permissionAdminRights,
   ]);
+
+  useEffect(() => {
+    saveToStorage(KEYS.ASSET_OBJECTS, assetObjects);
+  }, [assetObjects]);
 
   const handleResetMockPermissions = () => {
     const defaults = resetMockPermissionConfig();
@@ -561,6 +612,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
             setAdminRights={setPermissionAdminRights}
             workflows={workflowTypes}
             users={users}
+            periodicTemplates={periodicTemplates}
+            orders={orders}
             currentUser={currentUser}
             onResetMockPermissions={handleResetMockPermissions}
           />
@@ -698,6 +751,8 @@ function RolesPermissionsPlaceholder({
   setAdminRights,
   workflows,
   users,
+  periodicTemplates,
+  orders,
   currentUser,
   onResetMockPermissions,
 }: {
@@ -717,6 +772,8 @@ function RolesPermissionsPlaceholder({
   setAdminRights: React.Dispatch<React.SetStateAction<AdminRightsPermission[]>>;
   workflows: WorkflowType[];
   users: User[];
+  periodicTemplates: any[];
+  orders: any[];
   currentUser: AuthUser | null;
   onResetMockPermissions: () => void;
 }) {
@@ -727,6 +784,7 @@ function RolesPermissionsPlaceholder({
   >("roles");
   const [roleSearchQuery, setRoleSearchQuery] = useState("");
   const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id || "");
+  const [pendingDeleteRole, setPendingDeleteRole] = useState<PermissionRole | null>(null);
   const [showMigrationDetails, setShowMigrationDetails] = useState(false);
 
   type ModulePermissionKey =
@@ -788,6 +846,16 @@ function RolesPermissionsPlaceholder({
   const visibleWorkflowPermissionKeys = workflowPermissionKeys.filter(
     (permission) => permission.key !== "canApprove",
   );
+  const protectedSystemRoleNames = new Set([
+    "SYSTEM_OWNER",
+    "SUPER_ADMIN",
+    "ADMIN",
+    "OPS",
+    "KOORDINATORIUS",
+    "COORDINATOR",
+    "CS",
+    "ACCOUNTING",
+  ]);
   const adminRightsKeys: Array<{ key: AdminRightsKey; label: string }> = [
     { key: "canManageUsers", label: "Users" },
     { key: "canManageRoles", label: "Roles" },
@@ -874,8 +942,84 @@ function RolesPermissionsPlaceholder({
   });
   const selectedRole =
     roles.find((role) => role.id === selectedRoleId) || roles[0];
+  const isProtectedSystemRole = (role: PermissionRole) =>
+    role.systemRole || protectedSystemRoleNames.has(role.name.trim().toUpperCase());
+  const roleTokens = (role: PermissionRole) =>
+    new Set([
+      role.id,
+      role.name,
+      role.name.trim().toUpperCase(),
+      role.name.trim().toLowerCase(),
+    ]);
+  const valueReferencesRole = (value: unknown, role: PermissionRole): boolean => {
+    const tokens = roleTokens(role);
+    if (typeof value === "string") return tokens.has(value) || tokens.has(value.toUpperCase()) || tokens.has(value.toLowerCase());
+    if (Array.isArray(value)) return value.some((item) => valueReferencesRole(item, role));
+    if (value && typeof value === "object") {
+      return Object.values(value as Record<string, unknown>).some((item) =>
+        valueReferencesRole(item, role),
+      );
+    }
+    return false;
+  };
   const getRoleAssignmentCount = (roleId: string) =>
     users.filter((user) => (user.assignedRoleIds || []).includes(roleId)).length;
+  const hasEnabledPermission = (entry: Record<string, unknown>) =>
+    Object.entries(entry).some(
+      ([key, value]) => key !== "roleId" && value === true,
+    );
+  const getRoleUsage = (role: PermissionRole) => ({
+    users: users.filter(
+      (user) =>
+        (user.assignedRoleIds || []).includes(role.id) ||
+        user.role === role.name ||
+        user.role === role.name.toUpperCase(),
+    ).length,
+    workflow: workflows.filter((workflow) =>
+      valueReferencesRole(
+        {
+          allowedRoles: workflow.allowedRoles,
+          permissionsConfig: workflow.permissionsConfig,
+          assignmentRules: workflow.assignmentRules,
+        },
+        role,
+      ),
+    ).length,
+    periodic: periodicTemplates.filter((template) =>
+      valueReferencesRole(
+        {
+          responsibleMode: template?.responsibleMode,
+          assignmentStrategy: template?.assignmentStrategy,
+          roleId: template?.roleId,
+          roleQueueId: template?.roleQueueId,
+          assignedTo: template?.assignedTo,
+        },
+        role,
+      ),
+    ).length,
+    orders: orders.filter((order) =>
+      valueReferencesRole(
+        {
+          approvalRoleId: order?.approvalRoleId,
+          approverRoleId: order?.approverRoleId,
+          roleId: order?.roleId,
+          approvalChain: order?.approvalChain,
+        },
+        role,
+      ),
+    ).length,
+    permissions: [
+      ...moduleAccess,
+      ...workflowAccess,
+      ...objectScopes,
+      ...tenantScopes,
+      ...adminRights,
+    ].filter(
+      (entry) =>
+        entry.roleId === role.id &&
+        hasEnabledPermission(entry as Record<string, unknown>),
+    ).length,
+  });
 
   const getModuleAccess = (roleId: string, moduleId: string) =>
     moduleAccess.find(
@@ -941,31 +1085,60 @@ function RolesPermissionsPlaceholder({
   };
 
   const deleteRole = (role: PermissionRole) => {
-    if (role.systemRole) return;
+    if (isProtectedSystemRole(role)) return;
 
-    if (getRoleAssignmentCount(role.id) > 0) {
-      alert("Role cannot be deleted because it is assigned to users.");
+    const usage = getRoleUsage(role);
+    if (
+      usage.users > 0 ||
+      usage.workflow > 0 ||
+      usage.periodic > 0 ||
+      usage.orders > 0 ||
+      usage.permissions > 0
+    ) {
+      alert(
+        [
+          "Negalima ištrinti rolės.",
+          "",
+          "Naudojama sistemoje:",
+          "",
+          `Vartotojai: ${usage.users}`,
+          `Workflow: ${usage.workflow}`,
+          `Periodiniai: ${usage.periodic}`,
+          `Užsakymai: ${usage.orders}`,
+          `Teisės: ${usage.permissions}`,
+        ].join("\n"),
+      );
       return;
     }
 
+    setPendingDeleteRole(role);
+  };
+
+  const confirmDeleteRole = () => {
+    if (!pendingDeleteRole) return;
+
     setRoles((currentRoles) =>
-      currentRoles.filter((currentRole) => currentRole.id !== role.id),
+      currentRoles.filter((currentRole) => currentRole.id !== pendingDeleteRole.id),
     );
     setModuleAccess((currentAccess) =>
-      currentAccess.filter((access) => access.roleId !== role.id),
+      currentAccess.filter((access) => access.roleId !== pendingDeleteRole.id),
     );
     setWorkflowAccess((currentAccess) =>
-      currentAccess.filter((access) => access.roleId !== role.id),
+      currentAccess.filter((access) => access.roleId !== pendingDeleteRole.id),
     );
     setObjectScopes((currentScopes) =>
-      currentScopes.filter((scope) => scope.roleId !== role.id),
+      currentScopes.filter((scope) => scope.roleId !== pendingDeleteRole.id),
     );
     setTenantScopes((currentScopes) =>
-      currentScopes.filter((scope) => scope.roleId !== role.id),
+      currentScopes.filter((scope) => scope.roleId !== pendingDeleteRole.id),
     );
     setAdminRights((currentRights) =>
-      currentRights.filter((rights) => rights.roleId !== role.id),
+      currentRights.filter((rights) => rights.roleId !== pendingDeleteRole.id),
     );
+    if (selectedRoleId === pendingDeleteRole.id) {
+      setSelectedRoleId((roles.find((role) => role.id !== pendingDeleteRole.id) || roles[0])?.id || "");
+    }
+    setPendingDeleteRole(null);
   };
 
   const toggleModuleAccess = (
@@ -1256,9 +1429,8 @@ function RolesPermissionsPlaceholder({
 
               <div className="mt-4 grid gap-2">
                 {filteredRoles.map((role) => (
-                  <button
+                  <div
                     key={role.id}
-                    onClick={() => setSelectedRoleId(role.id)}
                     className={cn(
                       "rounded-2xl border p-3 text-left transition-colors",
                       selectedRole?.id === role.id
@@ -1267,9 +1439,15 @@ function RolesPermissionsPlaceholder({
                     )}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-900">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoleId(role.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                      <p className="truncate text-sm font-semibold text-slate-900">
                         {role.name}
                       </p>
+                      </button>
                       <span
                         className={cn(
                           "rounded-full px-2 py-0.5 text-[10px] font-bold",
@@ -1281,13 +1459,31 @@ function RolesPermissionsPlaceholder({
                         {role.active ? "Active" : "Inactive"}
                       </span>
                     </div>
-                    <p className="mt-1 line-clamp-2 text-xs text-slate-500">
-                      {role.description || "No description"}
-                    </p>
-                    <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                      {role.systemRole ? "System role" : "Custom role"}
-                    </p>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRoleId(role.id)}
+                      className="mt-1 w-full text-left"
+                    >
+                      <p className="line-clamp-2 text-xs text-slate-500">
+                        {role.description || "No description"}
+                      </p>
+                    </button>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        {isProtectedSystemRole(role) ? "System role" : "Custom role"}
+                      </p>
+                      {!isProtectedSystemRole(role) && (
+                        <button
+                          type="button"
+                          onClick={() => deleteRole(role)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-[10px] font-black text-red-700 hover:bg-red-100"
+                          title="Trinti"
+                        >
+                          <Trash2 size={12} /> Trinti
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
                 {!filteredRoles.length && (
                   <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
@@ -2062,6 +2258,41 @@ function RolesPermissionsPlaceholder({
             )}
           </div>
         )}
+
+        <AdminModal
+          title="Tikrai ištrinti rolę?"
+          isOpen={Boolean(pendingDeleteRole)}
+          onClose={() => setPendingDeleteRole(null)}
+        >
+          {pendingDeleteRole && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+                <p className="text-sm font-black text-red-900">
+                  Tikrai ištrinti rolę?
+                </p>
+                <p className="mt-1 text-xs font-semibold text-red-700">
+                  {pendingDeleteRole.name}
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingDeleteRole(null)}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-black text-slate-600 hover:bg-slate-200"
+                >
+                  Atšaukti
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteRole}
+                  className="rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-700"
+                >
+                  Ištrinti
+                </button>
+              </div>
+            </div>
+          )}
+        </AdminModal>
       </div>
     </div>
   );
@@ -2388,9 +2619,9 @@ function AssetTypesAdmin({
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+      <div className="min-h-0 max-h-[calc(100vh-360px)] overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] uppercase text-slate-400 font-black shadow-[0_1px_0_0_rgba(226,232,240,1)]">
             <tr>
               <th className="px-4 py-3 text-left">Pavadinimas</th>
               <th className="px-4 py-3 text-left">Veikimo logika</th>
@@ -2469,6 +2700,15 @@ function AssetTypesAdmin({
       >
         {editing && (
           <div className="space-y-4">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setWorkflowHelpOpen(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-100"
+              >
+                📘 Kaip veikia workflow
+              </button>
+            </div>
             <label className="block space-y-1">
               <span className="text-[11px] font-black uppercase text-slate-400">
                 Pavadinimas
@@ -2575,7 +2815,9 @@ function AssetObjectsAdmin({
   heading?: string;
 }) {
   const [editing, setEditing] = useState<AssetObject | null>(null);
+  const assetImageInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showImport, setShowImport] = useState(false);
   const defaultAssetTypeId =
     lockedAssetTypeId ||
     assetTypes.find((assetType) => assetType.usesAssets)?.id ||
@@ -2584,6 +2826,13 @@ function AssetObjectsAdmin({
   const getAssetTypeLabel = (assetTypeId: string) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
     assetTypeId;
+  const selectedAssetType = assetTypes.find(
+    (assetType) => assetType.id === defaultAssetTypeId,
+  );
+  const isEquipmentAssetType =
+    selectedAssetType?.code === "EQUIPMENT" ||
+    selectedAssetType?.name === "Treniruokliai";
+  const isEquipmentBulkContext = Boolean(lockedAssetTypeId) && isEquipmentAssetType;
   const getPriorityLabel = (priority: AssetIssueType["priority"]) => {
     if (priority === "low") return "Žemas";
     if (priority === "high") return "Aukštas";
@@ -2592,6 +2841,43 @@ function AssetObjectsAdmin({
   };
   const getClubLabel = (clubId?: string) =>
     clubId ? clubs.find((club) => club.id === clubId)?.name || clubId : "-";
+  const getAssetImageUrl = (object: AssetObject) =>
+    typeof object.metadata?.imageUrl === "string" ? object.metadata.imageUrl : "";
+  const getAssetLocation = (object: AssetObject) =>
+    typeof object.metadata?.location === "string" ? object.metadata.location : "";
+  const updateEditingMetadata = (key: string, value: string) => {
+    if (!editing) return;
+    setEditing({
+      ...editing,
+      metadata: {
+        ...(editing.metadata || {}),
+        [key]: value || undefined,
+      },
+    });
+  };
+  const handleAssetImageUpload = (file?: File) => {
+    if (!editing || !file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      window.alert("Galimi formatai: JPG, PNG arba WEBP.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      setEditing((current) =>
+        current
+          ? {
+              ...current,
+              metadata: {
+                ...(current.metadata || {}),
+                imageUrl: reader.result,
+              },
+            }
+          : current,
+      );
+    };
+    reader.readAsDataURL(file);
+  };
   const filteredObjects = assetObjects.filter((object) => {
     if (lockedAssetTypeId && object.assetTypeId !== lockedAssetTypeId) {
       return false;
@@ -2648,9 +2934,26 @@ function AssetObjectsAdmin({
     if (!window.confirm("Ištrinti turto vienetą?")) return;
     setAssetObjects(assetObjects.filter((object) => object.id !== objectId));
   };
+  const deleteAllEquipmentAssets = () => {
+    if (!isEquipmentBulkContext) return;
+    const equipmentCount = assetObjects.filter(
+      (object) => object.assetTypeId === defaultAssetTypeId,
+    ).length;
+    if (equipmentCount === 0) return;
+    if (
+      !window.confirm(
+        `Ištrinti visus treniruoklius (${equipmentCount})? Asset Type, gedimų tipai, workflow, teisės ir QR logika nebus trinami.`,
+      )
+    ) {
+      return;
+    }
+    setAssetObjects(
+      assetObjects.filter((object) => object.assetTypeId !== defaultAssetTypeId),
+    );
+  };
 
   return (
-    <div className="p-3 md:p-6 w-full h-auto min-h-0 overflow-visible">
+    <div className="p-3 md:p-6 w-full min-h-0 overflow-visible flex flex-col">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 w-full md:w-auto">
           <h2 className="text-xl font-bold">{heading}</h2>
@@ -2668,24 +2971,42 @@ function AssetObjectsAdmin({
             />
           </div>
         </div>
-        <button
-          onClick={createAssetObject}
-          className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
-        >
-          <Plus size={16} /> Sukurti turto vienetą
-        </button>
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {isEquipmentBulkContext && filteredObjects.length > 0 && (
+            <button
+              onClick={deleteAllEquipmentAssets}
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-100 rounded-xl font-bold hover:bg-red-100 text-sm transition-all"
+            >
+              <Trash2 size={16} /> Ištrinti visus treniruoklius
+            </button>
+          )}
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 text-sm transition-all"
+          >
+            <Upload size={16} /> Importuoti
+          </button>
+          <button
+            onClick={createAssetObject}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-xl font-bold hover:bg-slate-800 text-sm"
+          >
+            <Plus size={16} /> Sukurti turto vienetą
+          </button>
+        </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+      <div className="min-h-0 max-h-[calc(100vh-360px)] overflow-auto rounded-2xl border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-[11px] uppercase text-slate-400 font-black">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] uppercase text-slate-400 font-black shadow-[0_1px_0_0_rgba(226,232,240,1)]">
             <tr>
+              <th className="px-4 py-3 text-left">Foto</th>
               <th className="px-4 py-3 text-left">Pavadinimas</th>
               {!lockedAssetTypeId && (
                 <th className="px-4 py-3 text-left">Turto tipas</th>
               )}
               <th className="px-4 py-3 text-left">Kodas</th>
               <th className="px-4 py-3 text-left">Klubas</th>
+              <th className="px-4 py-3 text-left">Lokacija</th>
               <th className="px-4 py-3 text-left">Statusas</th>
               <th className="px-4 py-3 text-right">Veiksmai</th>
             </tr>
@@ -2693,6 +3014,20 @@ function AssetObjectsAdmin({
           <tbody className="divide-y divide-slate-100">
             {filteredObjects.map((object) => (
               <tr key={object.id} className="hover:bg-slate-50/70">
+                <td className="px-4 py-3">
+                  {getAssetImageUrl(object) ? (
+                    <img
+                      src={getAssetImageUrl(object)}
+                      alt={object.name}
+                      className="h-10 w-10 rounded-xl border border-slate-200 object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-300">
+                      <Dumbbell size={18} />
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-3 font-bold text-slate-900">
                   {object.name}
                 </td>
@@ -2706,6 +3041,9 @@ function AssetObjectsAdmin({
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {getClubLabel(object.clubId)}
+                </td>
+                <td className="px-4 py-3 text-slate-600">
+                  {getAssetLocation(object) || "-"}
                 </td>
                 <td className="px-4 py-3">
                   <AdminActiveSwitch
@@ -2742,16 +3080,69 @@ function AssetObjectsAdmin({
             {filteredObjects.length === 0 && (
               <tr>
                 <td
-                  colSpan={lockedAssetTypeId ? 5 : 6}
-                  className="py-8 text-center text-slate-500 font-medium"
+                  colSpan={lockedAssetTypeId ? 7 : 8}
+                  className="py-14 text-center"
                 >
-                  Nerasta rezultatų
+                  <div className="mx-auto flex max-w-sm flex-col items-center gap-4 px-4">
+                    <div className="rounded-2xl bg-slate-50 p-4 text-slate-400">
+                      <Dumbbell size={28} />
+                    </div>
+                    <div>
+                      <p className="text-base font-black text-slate-900">
+                        {isEquipmentAssetType
+                          ? "Treniruoklių nėra"
+                          : "Turto vienetų nėra"}
+                      </p>
+                      <p className="mt-1 text-sm font-medium text-slate-500">
+                        {searchQuery.trim()
+                          ? "Pakeiskite paiešką arba sukurkite naują turto vienetą."
+                          : "Importuokite sąrašą arba sukurkite turto vienetą ranka."}
+                      </p>
+                    </div>
+                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
+                      <button
+                        onClick={() => setShowImport(true)}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200"
+                      >
+                        <Upload size={16} /> Importuoti
+                      </button>
+                      <button
+                        onClick={createAssetObject}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+                      >
+                        <Plus size={16} /> Sukurti ranka
+                      </button>
+                    </div>
+                  </div>
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      <AssetImportModal
+        isOpen={showImport}
+        onClose={() => setShowImport(false)}
+        clubs={clubs}
+        assetTypeId={defaultAssetTypeId}
+        existingObjects={assetObjects}
+        onImport={(imported) => {
+          setAssetObjects((prev) => {
+            const merged = [...prev];
+            imported.forEach((obj) => {
+              const idx = merged.findIndex((o) => o.id === obj.id);
+              if (idx >= 0) {
+                merged[idx] = obj;
+              } else {
+                merged.push(obj);
+              }
+            });
+            return merged;
+          });
+          setShowImport(false);
+        }}
+      />
 
       <AdminModal
         title="Turto vienetas"
@@ -2846,6 +3237,83 @@ function AssetObjectsAdmin({
                     ))}
                 </select>
               </label>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Lokacija
+              </span>
+              <input
+                value={getAssetLocation(editing)}
+                onChange={(event) =>
+                  updateEditingMetadata("location", event.target.value)
+                }
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                placeholder="Pvz.: Kardio zona"
+              />
+            </label>
+
+            <div className="block space-y-2">
+              <span className="text-[11px] font-black uppercase text-slate-400">
+                Preview nuotrauka
+              </span>
+              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:flex-row sm:items-center">
+                {getAssetImageUrl(editing) ? (
+                  <img
+                    src={getAssetImageUrl(editing)}
+                    alt={editing.name}
+                    className="h-20 w-20 rounded-2xl border border-slate-200 bg-white object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white text-slate-300">
+                    <Dumbbell size={26} />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => assetImageInputRef.current?.click()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+                    >
+                      <Upload size={16} /> Įkelti
+                    </button>
+                    {getAssetImageUrl(editing) && (
+                      <button
+                        type="button"
+                        onClick={() => updateEditingMetadata("imageUrl", "")}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200"
+                      >
+                        <X size={16} /> Šalinti
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={assetImageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(event) => {
+                      handleAssetImageUpload(event.target.files?.[0]);
+                      event.target.value = "";
+                    }}
+                  />
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      URL papildomai
+                    </span>
+                    <input
+                      value={getAssetImageUrl(editing)}
+                      onChange={(event) =>
+                        updateEditingMetadata("imageUrl", event.target.value)
+                      }
+                      className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold bg-white"
+                      placeholder="https://..."
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
 
             <label className="block space-y-1">
@@ -3207,6 +3675,7 @@ function WorkflowTypesAdmin({
   const [editing, setEditing] = useState<WorkflowType | null>(null);
   const [pendingDeleteWorkflow, setPendingDeleteWorkflow] =
     useState<WorkflowType | null>(null);
+  const [workflowHelpOpen, setWorkflowHelpOpen] = useState(false);
   const [workflowArchiveFilter, setWorkflowArchiveFilter] = useState<
     "active" | "archive"
   >("active");
@@ -3224,6 +3693,92 @@ function WorkflowTypesAdmin({
   const getAssetTypeLabel = (assetTypeId?: string | null) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
     "Be turto tipo";
+  const getWorkflowScopeLabel = (workflow: Partial<WorkflowType>) =>
+    ({
+      GLOBAL: "Globalus",
+      REGION: "Regioninis",
+      CLUB: "Klubinis",
+    })[resolveWorkflowScope(workflow)];
+  const getWorkflowPurposeLabel = (workflow: Partial<WorkflowType>) =>
+    ({
+      FAULTS: "Gedimai",
+      TASKS: "Užduotys",
+      ORDERS: "Užsakymai",
+      PERIODIC: "Periodiniai",
+      PROJECTS: "Projektai",
+      SUGGESTIONS: "Pasiūlymai",
+    })[resolveWorkflowPurpose(workflow)];
+  const hasClubField = (workflow: Partial<WorkflowType>) =>
+    Boolean(
+      workflow.requiredFields?.some(
+        (field) => field.id === "clubId" || field.type === "club",
+      ),
+    );
+  const resolveWorkflowScope = (workflow: Partial<WorkflowType>) =>
+    workflow.workflowScope || "GLOBAL";
+  const resolveUsesClub = (workflow: Partial<WorkflowType>) =>
+    workflow.usesClub ?? hasClubField(workflow) ?? Boolean(workflow.usesScope);
+  const resolveUsesAsset = (workflow: Partial<WorkflowType>) =>
+    workflow.usesAsset ??
+    Boolean(workflow.assetTypeId && workflow.objectType !== "ORDER");
+  const resolveUsesSla = (workflow: Partial<WorkflowType>) =>
+    workflow.usesSla ?? Boolean(workflow.analyticsConfig?.trackSla);
+  const resolveWorkflowPurpose = (
+    workflow: Partial<WorkflowType>,
+  ): NonNullable<WorkflowType["workflowPurpose"]> => {
+    if (workflow.workflowPurpose) return workflow.workflowPurpose;
+    if (workflow.action === "order" || workflow.objectType === "ORDER") return "ORDERS";
+    if (workflow.legacyCategory?.includes("FAULT")) return "FAULTS";
+    if (workflow.id === "suggestions" || workflow.category === "IDEJOS") return "SUGGESTIONS";
+    if (workflow.legacyCategory === "SOP") return "TASKS";
+    return "TASKS";
+  };
+  const getObjectTypeForAssetType = (assetTypeId?: string | null): WorkflowType["objectType"] => {
+    const assetType = assetTypes.find((item) => item.id === assetTypeId);
+    const key = `${assetType?.code || ""} ${assetType?.name || ""}`.toLowerCase();
+    if (key.includes("equipment") || key.includes("treniruok")) return "EQUIPMENT";
+    if (key.includes("facility") || key.includes("patalp")) return "FACILITY";
+    return "GENERIC";
+  };
+  const syncRequiredFields = (
+    workflow: WorkflowType,
+    usesClub: boolean,
+    usesAsset: boolean,
+    purpose: NonNullable<WorkflowType["workflowPurpose"]>,
+  ): WorkflowType["requiredFields"] => {
+    const nextFields = (workflow.requiredFields || []).filter((field) => {
+      if (field.id === "clubId" || field.type === "club") return usesClub;
+      if (
+        ["equipmentId", "assetObjectId", "assetIssueTypeId", "typeId"].includes(field.id) ||
+        field.type === "equipment"
+      ) {
+        return usesAsset;
+      }
+      if (field.id === "orderCategory") return purpose === "ORDERS";
+      return true;
+    });
+    const ensureField = (field: WorkflowType["requiredFields"][number]) => {
+      if (!nextFields.some((item) => item.id === field.id)) nextFields.push(field);
+    };
+
+    if (usesClub) {
+      ensureField({ id: "clubId", label: "Sporto klubas", type: "club", required: true });
+    }
+    if (usesAsset) {
+      ensureField({ id: "equipmentId", label: "Turto vienetas", type: "select", required: true });
+      if (purpose === "FAULTS") {
+        ensureField({ id: "typeId", label: "Gedimo tipas", type: "select", required: true });
+      }
+    }
+    if (purpose === "ORDERS") {
+      ensureField({ id: "orderCategory", label: "Užsakymo kategorija", type: "select", required: true });
+    }
+    if (!nextFields.some((field) => field.id === "description")) {
+      nextFields.push({ id: "description", label: "Aprašymas", type: "textarea", required: true });
+    }
+
+    return nextFields;
+  };
 
   const getWorkflowUsage = useCallback(
     (workflow: WorkflowType) => {
@@ -3321,6 +3876,25 @@ function WorkflowTypesAdmin({
     if (!editing || !setWorkflows) return;
 
     const exists = workflows.some((workflow) => workflow.id === editing.id);
+    const workflowScope = resolveWorkflowScope(editing);
+    const usesClub = resolveUsesClub(editing);
+    const usesAsset = resolveUsesAsset(editing);
+    const usesSla = resolveUsesSla(editing);
+    const workflowPurpose = resolveWorkflowPurpose(editing);
+    const nextAction =
+      workflowPurpose === "ORDERS" ? "order" : workflowPurpose === "FAULTS" ? "fault" : "other";
+    const nextCategory =
+      workflowPurpose === "ORDERS"
+        ? "UZSAKYMAI"
+        : workflowPurpose === "SUGGESTIONS"
+          ? "IDEJOS"
+          : "DARBAI";
+    const nextObjectType =
+      workflowPurpose === "ORDERS"
+        ? "ORDER"
+        : usesAsset
+          ? getObjectTypeForAssetType(editing.assetTypeId) || editing.objectType || "GENERIC"
+          : "GENERIC";
     const nextWorkflow = {
       ...editing,
       id:
@@ -3331,15 +3905,32 @@ function WorkflowTypesAdmin({
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, ""),
       legacyCategory: editing.legacyCategory || editing.id || "OTHER",
+      action: nextAction,
+      category: nextCategory,
       statuses: editing.statuses.length ? editing.statuses : initialWorkflowTypes[0].statuses,
       priorities: editing.priorities.length
         ? editing.priorities
         : initialWorkflowTypes[0].priorities,
-      objectType: editing.objectType || "GENERIC",
-      assetTypeId: editing.assetTypeId || null,
+      objectType: nextObjectType,
+      assetTypeId: usesAsset ? editing.assetTypeId || null : null,
       qrMode: editing.qrMode || "OFF",
-      usesScope: editing.usesScope ?? false,
+      usesScope: usesClub || workflowScope !== "GLOBAL",
+      workflowScope,
+      usesClub,
+      usesAsset,
+      usesSla,
+      workflowPurpose,
       ownerUserId: editing.ownerUserId ?? null,
+      analyticsConfig: {
+        ...editing.analyticsConfig,
+        trackSla: usesSla,
+      },
+      requiredFields: syncRequiredFields(
+        editing,
+        usesClub,
+        usesAsset,
+        workflowPurpose,
+      ),
       archivedAt: editing.archivedAt,
       archivedBy: editing.archivedBy,
       archiveReason: editing.archiveReason,
@@ -3375,6 +3966,11 @@ function WorkflowTypesAdmin({
       assetTypeId: null,
       qrMode: "OFF",
       usesScope: false,
+      workflowScope: "GLOBAL",
+      usesClub: false,
+      usesAsset: false,
+      usesSla: true,
+      workflowPurpose: "TASKS",
       ownerUserId: null,
       linkedConfigs: {},
       templates: [],
@@ -3513,19 +4109,27 @@ function WorkflowTypesAdmin({
                   <span className="block text-slate-400 uppercase">
                     Turto tipas
                   </span>
-                  {getAssetTypeLabel(workflow.assetTypeId)}
+                  {resolveUsesAsset(workflow) ? getAssetTypeLabel(workflow.assetTypeId) : "Nenaudoja"}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3">
-                  <span className="block text-slate-400 uppercase">Statuses</span>
-                  {workflow.statuses.length}
+                  <span className="block text-slate-400 uppercase">Paskirtis</span>
+                  {getWorkflowPurposeLabel(workflow)}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3">
                   <span className="block text-slate-400 uppercase">QR</span>
-                  {workflow.qrMode || "OFF"}
+                  {workflow.qrMode && workflow.qrMode !== "OFF" ? "Taip" : "Ne"}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3">
                   <span className="block text-slate-400 uppercase">Scope</span>
-                  {workflow.usesScope ? "ON" : "OFF"}
+                  {getWorkflowScopeLabel(workflow)}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">Klubas</span>
+                  {resolveUsesClub(workflow) ? "Taip" : "Ne"}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <span className="block text-slate-400 uppercase">SLA</span>
+                  {resolveUsesSla(workflow) ? "Taip" : "Ne"}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-3">
                   <span className="block text-slate-400 uppercase">Owner</span>
@@ -3673,11 +4277,104 @@ function WorkflowTypesAdmin({
               />
             </label>
 
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <label className="block space-y-1">
-                <span className="text-[11px] font-black uppercase text-slate-400">
-                  Turto tipas
-                </span>
+                <WorkflowFieldHelp
+                  label="Workflow Scope"
+                  details="Globalus: vienas workflow naudojamas visuose sporto klubuose. Regioninis: workflow naudojamas tik pasirinktam regionui. Klubinis: workflow naudojamas tik konkrečiam sporto klubui."
+                />
+                <select
+                  value={resolveWorkflowScope(editing)}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      workflowScope: event.target.value as WorkflowType["workflowScope"],
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="GLOBAL">Globalus</option>
+                  <option value="REGION">Regioninis</option>
+                  <option value="CLUB">Klubinis</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <WorkflowFieldHelp
+                  label="Workflow paskirtis"
+                  details="Gedimai: skirtas registruoti ir šalinti gedimus. Užduotys: skirtas vienkartinėms užduotims. Užsakymai: skirtas prekių ir paslaugų užsakymams. Periodiniai darbai: skirtas pasikartojančioms užduotims. Projektai: skirtas ilgesniems projektams. Pasiūlymai: skirtas idėjoms ir pasiūlymams."
+                />
+                <select
+                  value={resolveWorkflowPurpose(editing)}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      workflowPurpose: event.target.value as WorkflowType["workflowPurpose"],
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="FAULTS">Gedimai</option>
+                  <option value="TASKS">Užduotys</option>
+                  <option value="ORDERS">Užsakymai</option>
+                  <option value="PERIODIC">Periodiniai darbai</option>
+                  <option value="PROJECTS">Projektai</option>
+                  <option value="SUGGESTIONS">Pasiūlymai</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="block space-y-1">
+                <WorkflowFieldHelp
+                  label="Naudoja sporto klubą"
+                  details="TAIP: registruojant būtina pasirinkti sporto klubą. NE: workflow nepriklauso nuo konkretaus sporto klubo."
+                />
+                <select
+                  value={resolveUsesClub(editing) ? "YES" : "NO"}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      usesClub: event.target.value === "YES",
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="YES">Taip</option>
+                  <option value="NO">Ne</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <WorkflowFieldHelp
+                  label="Naudoja turtą"
+                  details="TAIP: registruojant pasirenkamas konkretus turto objektas. NE: workflow nėra susietas su turto objektais."
+                />
+                <select
+                  value={resolveUsesAsset(editing) ? "YES" : "NO"}
+                  onChange={(event) => {
+                    const usesAsset = event.target.value === "YES";
+                    setEditing({
+                      ...editing,
+                      usesAsset,
+                      assetTypeId: usesAsset ? editing.assetTypeId : null,
+                      qrMode: usesAsset && editing.qrMode !== "OFF" ? "ASSET_BASED" : editing.qrMode,
+                    });
+                  }}
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="YES">Taip</option>
+                  <option value="NO">Ne</option>
+                </select>
+              </label>
+            </div>
+
+            {resolveUsesAsset(editing) && (
+              <label className="block space-y-1">
+                <WorkflowFieldHelp
+                  label="Turto tipas"
+                  details="Treniruokliai: leidžiama dirbti tik su treniruoklių objektais. Patalpos: leidžiama dirbti tik su patalpų objektais. Kitas: leidžiama naudoti kitus turto tipus."
+                />
                 <select
                   value={editing.assetTypeId || ""}
                   onChange={(event) =>
@@ -3688,7 +4385,7 @@ function WorkflowTypesAdmin({
                   }
                   className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
                 >
-                  <option value="">Be turto tipo</option>
+                  <option value="">Kitas</option>
                   {assetTypes
                     .filter(
                       (assetType) =>
@@ -3702,33 +4399,59 @@ function WorkflowTypesAdmin({
                     ))}
                 </select>
               </label>
-            </div>
+            )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <label className="block space-y-1">
-                <span className="text-[11px] font-black uppercase text-slate-400">
-                  QR Mode
-                </span>
+                <WorkflowFieldHelp
+                  label="QR registracija"
+                  details="TAIP: gedimą galima registruoti nuskenavus QR. NE: registracija vykdoma rankiniu būdu."
+                />
                 <select
-                  value={editing.qrMode || "OFF"}
+                  value={editing.qrMode && editing.qrMode !== "OFF" ? "YES" : "NO"}
                   onChange={(event) =>
                     setEditing({
                       ...editing,
-                      qrMode: event.target.value as WorkflowType["qrMode"],
+                      qrMode:
+                        event.target.value === "YES"
+                          ? resolveUsesAsset(editing)
+                            ? "ASSET_BASED"
+                            : "GENERIC"
+                          : "OFF",
                     })
                   }
                   className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
                 >
-                  <option value="OFF">OFF</option>
-                  <option value="GENERIC">GENERIC</option>
-                  <option value="ASSET_BASED">ASSET_BASED</option>
+                  <option value="YES">Taip</option>
+                  <option value="NO">Ne</option>
                 </select>
               </label>
 
               <label className="block space-y-1">
-                <span className="text-[11px] font-black uppercase text-slate-400">
-                  Owner
-                </span>
+                <WorkflowFieldHelp
+                  label="Naudoja SLA"
+                  details="TAIP: sistema skaičiuoja terminus ir vėlavimus. NE: terminų kontrolė netaikoma."
+                />
+                <select
+                  value={resolveUsesSla(editing) ? "YES" : "NO"}
+                  onChange={(event) =>
+                    setEditing({
+                      ...editing,
+                      usesSla: event.target.value === "YES",
+                    })
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
+                >
+                  <option value="YES">Taip</option>
+                  <option value="NO">Ne</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1">
+                <WorkflowFieldHelp
+                  label="Owner"
+                  details="Atsakingas asmuo, kuriam pagal nutylėjimą priskiriamos naujos užduotys."
+                />
                 <select
                   value={editing.ownerUserId || ""}
                   onChange={(event) =>
@@ -3750,9 +4473,10 @@ function WorkflowTypesAdmin({
             </div>
 
             <label className="block space-y-1">
-              <span className="text-[11px] font-black uppercase text-slate-400">
-                Statusai
-              </span>
+              <WorkflowFieldHelp
+                label="Statusai"
+                details="Nurodo galimas užduoties būsenas ir jos judėjimą procese."
+              />
               <input
                 value={editing.statuses.map((status) => status.label).join(", ")}
                 onChange={(event) => {
@@ -3774,51 +4498,7 @@ function WorkflowTypesAdmin({
               />
             </label>
 
-            <div className="rounded-xl bg-slate-50 p-3 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-black uppercase text-slate-400">
-                    Uses Region / Club Scope
-                  </p>
-                  <p className="text-xs font-semibold text-slate-500">
-                    {editing.usesScope
-                      ? "Workflow uses region/club filtering and routing."
-                      : "Workflow is global. Examples: Marketing, Camera Monitoring, IT."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={editing.usesScope}
-                  onClick={() =>
-                    setEditing({ ...editing, usesScope: !editing.usesScope })
-                  }
-                  className={cn(
-                    "shrink-0 px-3 py-2 rounded-xl border text-xs font-black transition-colors flex items-center gap-3",
-                    editing.usesScope
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : "bg-slate-100 text-slate-500 border-slate-200",
-                  )}
-                >
-                  <span>{editing.usesScope ? "ON" : "OFF"}</span>
-                  <span
-                    className={cn(
-                      "relative inline-flex h-5 w-9 rounded-full transition-colors",
-                      editing.usesScope ? "bg-emerald-500" : "bg-slate-300",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
-                        editing.usesScope ? "translate-x-4" : "translate-x-0.5",
-                      )}
-                    />
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            <label className="flex items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
+            <label className="flex items-start gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold">
               <input
                 type="checkbox"
                 checked={editing.enabled}
@@ -3827,7 +4507,10 @@ function WorkflowTypesAdmin({
                 }
                 className="h-4 w-4 accent-black"
               />
-              Workflow ijungtas
+              <WorkflowFieldHelp
+                label="Workflow įjungtas"
+                details="Įjungtas workflow gali būti naudojamas naujoms užduotims kurti."
+              />
             </label>
 
             <button
@@ -3838,6 +4521,86 @@ function WorkflowTypesAdmin({
             </button>
           </div>
         )}
+      </AdminModal>
+
+      <AdminModal
+        title="Kaip veikia workflow"
+        isOpen={workflowHelpOpen}
+        onClose={() => setWorkflowHelpOpen(false)}
+      >
+        <div className="space-y-5 text-sm text-slate-600">
+          <div>
+            <h3 className="font-black text-slate-900 uppercase text-xs tracking-wide">
+              Workflow logika
+            </h3>
+            <div className="mt-3 space-y-3">
+              <div>
+                <p className="font-black text-slate-800">Workflow Scope</p>
+                <p><strong>Globalus</strong> - vienas workflow visiems klubams.</p>
+                <p><strong>Regioninis</strong> - workflow naudojamas regionui.</p>
+                <p><strong>Klubinis</strong> - workflow naudojamas konkrečiam klubui.</p>
+              </div>
+              <div>
+                <p className="font-black text-slate-800">Naudoja sporto klubą</p>
+                <p><strong>TAIP</strong> - registruojant būtina pasirinkti klubą.</p>
+                <p><strong>NE</strong> - klubas nenaudojamas.</p>
+              </div>
+              <div>
+                <p className="font-black text-slate-800">Naudoja turtą</p>
+                <p><strong>TAIP</strong> - registruojant pasirenkamas turto objektas.</p>
+                <p><strong>NE</strong> - turto objektas nenaudojamas.</p>
+              </div>
+              <div>
+                <p className="font-black text-slate-800">Workflow paskirtis</p>
+                <p><strong>Gedimai</strong> - skirtas registruoti ir šalinti gedimus.</p>
+                <p><strong>Užduotys</strong> - skirtas vienkartinėms užduotims.</p>
+                <p><strong>Užsakymai</strong> - skirtas prekių ir paslaugų užsakymams.</p>
+                <p><strong>Periodiniai darbai</strong> - skirtas pasikartojančioms užduotims.</p>
+                <p><strong>Projektai</strong> - skirtas ilgesniems projektams.</p>
+                <p><strong>Pasiūlymai</strong> - skirtas idėjoms ir pasiūlymams.</p>
+              </div>
+              <div>
+                <p className="font-black text-slate-800">Turto tipas</p>
+                <p><strong>Treniruokliai</strong> - leidžiama dirbti tik su treniruoklių objektais.</p>
+                <p><strong>Patalpos</strong> - leidžiama dirbti tik su patalpų objektais.</p>
+                <p><strong>Kitas</strong> - leidžiama naudoti kitus turto tipus.</p>
+              </div>
+              <div>
+                <p className="font-black text-slate-800">QR registracija</p>
+                <p><strong>TAIP</strong> - gedimą galima registruoti nuskenavus QR.</p>
+                <p><strong>NE</strong> - registracija vykdoma rankiniu būdu.</p>
+              </div>
+              <div>
+                <p className="font-black text-slate-800">Naudoja SLA</p>
+                <p><strong>TAIP</strong> - sistema skaičiuoja terminus ir vėlavimus.</p>
+                <p><strong>NE</strong> - terminų kontrolė netaikoma.</p>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-black text-slate-900 uppercase text-xs tracking-wide">
+              Pavyzdžiai
+            </h3>
+            <div className="mt-3 grid gap-3">
+              {[
+                ["Treniruoklių gedimai", "Globalus", "Naudoja klubą = TAIP", "Naudoja turtą = TAIP", "Turto tipas = Treniruokliai"],
+                ["Patalpų gedimai", "Globalus", "Naudoja klubą = TAIP", "Naudoja turtą = TAIP", "Turto tipas = Patalpos"],
+                ["Marketingas", "Globalus", "Naudoja klubą = NE", "Naudoja turtą = NE"],
+                ["Užsakymai", "Globalus", "Naudoja klubą = TAIP", "Naudoja turtą = NE"],
+              ].map(([title, ...lines]) => (
+                <div key={title} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="font-black text-slate-900">{title}</p>
+                  {lines.map((line) => (
+                    <p key={line} className="text-xs font-semibold text-slate-500">
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </AdminModal>
     </div>
   );

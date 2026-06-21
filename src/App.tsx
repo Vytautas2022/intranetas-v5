@@ -145,6 +145,7 @@ import {
 import {
   isRegisteredWorkflowStatus,
   UNKNOWN_STATUS_LANE_ID,
+  getAllowedTransitions,
 } from "./logic/workflowStatusRegistry";
 import { getSOP } from "./logic/sopLogic";
 import { users } from "./mock-db/users";
@@ -287,6 +288,7 @@ import {
   type AssetIssueType,
 } from "./mock-db/assetIssueTypes";
 import {
+  assetObjects as initialAssetObjects,
   getAssetObjectsForAssetType,
   getEquipmentAssetObjects,
   getFacilityAssetObjects,
@@ -306,10 +308,12 @@ import { AuthProvider } from "./auth/AuthProvider";
 import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/authContext";
+import { DevRoleSwitcher } from "./components/DevRoleSwitcher";
 
 const equipmentIssueTypesList = getLegacyIssueTypes();
-const equipmentList = getEquipmentAssetObjects();
-const facilityAssetObjects = getFacilityAssetObjects();
+const runtimeAssetObjects = loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects);
+const equipmentList = getEquipmentAssetObjects(runtimeAssetObjects);
+const facilityAssetObjects = getFacilityAssetObjects(runtimeAssetObjects);
 const facilityTemplates = facilityAssetObjects.filter(
   (object) => !object.locationId,
 );
@@ -1752,12 +1756,9 @@ const FaultDetailPanel = ({
                       ))
                     : Object.values(Status)
                         .filter((s) => {
-                          if (fault.status === Status.SOMEDAY) {
-                            return (
-                              s === Status.SOMEDAY || s === Status.REJECTED
-                            );
-                          }
-                          return s !== Status.MOVED;
+                          if (s === Status.MOVED) return false;
+                          const allowed = getAllowedTransitions(fault.status);
+                          return s === fault.status || allowed.includes(s as Status);
                         })
                         .map((s) => (
                           <option key={`fault-status-${s}`} value={s}>
@@ -3318,6 +3319,46 @@ const QrReportView = ({
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [issueTypeId, setIssueTypeId] = useState<string>(() => {
+    if (!params.equipment_id) return "";
+    return equipmentIssueTypesList.find(
+      (it) => it.applies_to === "EQUIPMENT" || it.applies_to === "BOTH",
+    )?.id ?? "";
+  });
+  const [qrMedia, setQrMedia] = useState<
+    { id: string; type: "image" | "video"; url: string; name: string }[]
+  >([]);
+
+  const handleQrFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = Array.from(e.target.files || []);
+    const updated = [...qrMedia];
+    const imgCount = updated.filter((m) => m.type === "image").length;
+    const hasVideo = updated.some((m) => m.type === "video");
+    for (const file of files) {
+      if (file.type.startsWith("image/") && imgCount < 3) {
+        try {
+          const processed = await compressAndResizeImage(file);
+          updated.push({ id: generateUniqueId("qm"), ...processed });
+        } catch {
+          // skip unprocessable image
+        }
+      } else if (file.type.startsWith("video/") && !hasVideo) {
+        updated.push({
+          id: generateUniqueId("qm"),
+          type: "video",
+          url: URL.createObjectURL(file),
+          name: file.name,
+        });
+      }
+    }
+    setQrMedia(updated);
+    e.target.value = "";
+  };
+
+  const removeQrMedia = (id: string) =>
+    setQrMedia((prev) => prev.filter((m) => m.id !== id));
 
   const equipment = params.equipment_id
     ? equipmentList.find((e) => e.id === params.equipment_id)
@@ -3334,7 +3375,12 @@ const QrReportView = ({
 
   const handleSubmit = () => {
     const result = handleQrReport(
-      { ...params, comment },
+      {
+        ...params,
+        comment,
+        issue_type_id: issueTypeId || undefined,
+        media: qrMedia.map(({ type, url, name }) => ({ type, url, name })),
+      },
       allTasks,
       currentUser,
       workflowTypes,
@@ -3414,6 +3460,38 @@ const QrReportView = ({
         )}
 
         <div className="space-y-4">
+          {/* Issue type selector — equipment only */}
+          {params.equipment_id && !existingTask && (
+            <div className="space-y-2">
+              <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-1">
+                Gedimo tipas
+              </label>
+              <div className="flex flex-col gap-2">
+                {equipmentIssueTypesList
+                  .filter(
+                    (it) =>
+                      it.applies_to === "EQUIPMENT" ||
+                      it.applies_to === "BOTH",
+                  )
+                  .map((it) => (
+                    <button
+                      key={it.id}
+                      type="button"
+                      onClick={() => setIssueTypeId(it.id)}
+                      className={cn(
+                        "w-full px-4 py-3 rounded-xl border text-sm font-bold text-left transition-all",
+                        issueTypeId === it.id
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400",
+                      )}
+                    >
+                      {it.name}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-1">
               Apibūdinkite problemą
@@ -3422,14 +3500,68 @@ const QrReportView = ({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Pvz.: neįsijungia, girgžda, sulinkęs rėmas..."
-              className="w-full h-32 p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-lime focus:border-transparent transition-all resize-none font-medium text-slate-900"
+              className="w-full h-24 p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-lime focus:border-transparent transition-all resize-none font-medium text-slate-900"
             />
+          </div>
+
+          {/* Media upload */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-1">
+                Foto / Video
+              </label>
+              <span className="text-[9px] font-bold text-slate-400">
+                {qrMedia.filter((m) => m.type === "image").length}/3 foto ·{" "}
+                {qrMedia.some((m) => m.type === "video") ? "1/1" : "0/1"} video
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {qrMedia.map((m) => (
+                <div
+                  key={m.id}
+                  className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 group"
+                >
+                  {m.type === "image" ? (
+                    <img
+                      src={m.url}
+                      alt="Preview"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-slate-900 flex items-center justify-center text-white">
+                      <Film size={16} />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => removeQrMedia(m.id)}
+                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                  >
+                    <X size={14} className="text-white" />
+                  </button>
+                </div>
+              ))}
+              {(qrMedia.filter((m) => m.type === "image").length < 3 ||
+                !qrMedia.some((m) => m.type === "video")) && (
+                <label className="w-16 h-16 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:border-brand-lime hover:text-brand-lime cursor-pointer transition-all">
+                  <Camera size={18} />
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,video/*"
+                    className="hidden"
+                    onChange={handleQrFileUpload}
+                  />
+                </label>
+              )}
+            </div>
           </div>
 
           <button
             onClick={handleSubmit}
             disabled={
-              (!comment && !existingTask) || feedback?.type === "success"
+              feedback?.type === "success" ||
+              (!existingTask && !comment) ||
+              (!existingTask && !!params.equipment_id && !issueTypeId)
             }
             className="w-full py-4 bg-black text-white rounded-2xl font-black uppercase tracking-widest hover:bg-slate-900 transition-all shadow-lg shadow-brand-lime/20 disabled:opacity-50 disabled:shadow-none translate-y-0 active:translate-y-1"
           >
@@ -4262,9 +4394,10 @@ function MainApp() {
   const selectedAssetObject = React.useMemo<AssetObject | null>(() => {
     if (!isAssetRegistration || !regForm.equipmentId) return null;
     return (
-      getAssetObjectsForAssetType(selectedRegistrationAssetTypeId || "").find(
-        (object) => object.id === regForm.equipmentId,
-      ) || null
+      getAssetObjectsForAssetType(
+        selectedRegistrationAssetTypeId || "",
+        runtimeAssetObjects,
+      ).find((object) => object.id === regForm.equipmentId) || null
     );
   }, [isAssetRegistration, regForm.equipmentId, selectedRegistrationAssetTypeId]);
 
@@ -4352,6 +4485,7 @@ function MainApp() {
       const query = equipmentSearchQuery.toLowerCase();
       const options = getAssetObjectsForAssetType(
         selectedRegistrationAssetTypeId,
+        runtimeAssetObjects,
       )
         .filter(
           (object) =>
@@ -5333,6 +5467,10 @@ function MainApp() {
     const isOther = isGenericRegistration || regForm.typeId === "other";
 
     const firstImage = regForm.attachments.find((a) => a.type === "image");
+    const selectedAssetImageUrl =
+      typeof selectedAssetObject?.metadata?.imageUrl === "string"
+        ? selectedAssetObject.metadata.imageUrl
+        : "";
     const club = CLUBS.find((c) => c.id === regForm.clubId);
 
     let finalTitle = isOther ? regForm.title : "";
@@ -5445,7 +5583,9 @@ function MainApp() {
       type: compatibilityCategory,
       priority: finalPriority,
       coverImage:
-        isFacilityRegistration
+        isAssetRegistration && selectedAssetImageUrl
+          ? selectedAssetImageUrl
+          : isFacilityRegistration
           ? firstImage
             ? firstImage.url
             : ""
@@ -6787,6 +6927,8 @@ ${task.updatedBy}
                 )}
               </AnimatePresence>
             </div>
+
+            <DevRoleSwitcher users={appUsers} />
 
             <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-200 flex items-center justify-center text-[10px] text-slate-600 font-bold uppercase overflow-hidden ml-2">
               {currentUser.name[0]}

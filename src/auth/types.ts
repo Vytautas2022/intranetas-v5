@@ -57,4 +57,8 @@ export interface AuthContextValue {
     remember: boolean,
   ) => Promise<{ success: boolean; error?: string; user?: AuthUser }>;
   logout: () => void;
+  // DEV-only impersonation (undefined in production)
+  impersonatedUser?: AuthUser | null;
+  switchDevUser?: (user: AuthUser) => void;
+  clearDevUser?: () => void;
 }

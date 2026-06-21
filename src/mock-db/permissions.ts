@@ -172,6 +172,21 @@ export const moduleAccessPermissions: ModuleAccessPermission[] = [
     };
   }
 
+  // OPS and CS do not manage system configuration (users, clubs, etc.) via admin panel.
+  // They can still reach /admin/periodiniai because that route resolves via "periodiniai" moduleId, not "admin".
+  if (
+    access.moduleId === "admin" &&
+    ["role-ops", "role-cs"].includes(access.roleId)
+  ) {
+    return {
+      ...access,
+      canView: false,
+      canCreate: false,
+      canEdit: false,
+      canAdmin: false,
+    };
+  }
+
   return access;
 });
 

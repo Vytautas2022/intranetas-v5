@@ -5,6 +5,27 @@ export const MOCK_PASSWORD = "Test123!";
 
 export const mockUsers: AuthUser[] = [
   {
+    id: "u7",
+    name: "Vytautas",
+    email: "vytautas@sportgates.lt",
+    role: "SYSTEM_OWNER",
+    assignedRoleIds: ["role-super-admin"],
+    region: "ALL",
+    regionAccess: ["ALL"],
+    modulePermissions: [
+      "darbai",
+      "gedimai",
+      "periodiniai",
+      "admin",
+      "analytics",
+      "audit",
+      "orders",
+      "zmones",
+      "ceo",
+    ],
+    is_active: true,
+  },
+  {
     id: "u1",
     name: "Miglė",
     email: "migle@fitsport.lt",

@@ -31,6 +31,7 @@ import type {
   AdminModuleTabId,
 } from "../modules/moduleRegistry";
 import type { WorkflowType } from "../mock-db/workflowTypes";
+import { getOrderWorkflowModuleId, getOrderWorkflowTypeId } from "./workflowPurpose";
 
 export interface PermissionPreviewConfig {
   roles: PermissionRole[];
@@ -1019,6 +1020,8 @@ export const compareLegacyVsResolverActionAccess = (
     workflowTypeId: activeWorkflowId,
     moduleId: "darbai",
   };
+  const orderWorkflowTypeId = getOrderWorkflowTypeId(workflows);
+  const orderWorkflowModuleId = getOrderWorkflowModuleId(workflows);
   const legacyWorkflowVisible = activeWorkflow
     ? canLegacyViewWorkflow(user, activeWorkflow)
     : false;
@@ -1151,34 +1154,41 @@ export const compareLegacyVsResolverActionAccess = (
     createActionComparison({
       user,
       action: "orders-create",
-      targetId: "orders",
+      targetId: orderWorkflowTypeId || "order-workflow",
       targetLabel: "Orders create",
-      legacyAllowed: canAccessModule(
-        toLegacyPermissionSubject({
-          ...user,
-          permissions: undefined,
-          modulePermissions: undefined,
-        }),
-        "orders",
-      ),
-      resolverAllowed: canCreateWorkflowCardPreview(
-        user,
-        "orders",
-        "orders",
-        permissionsConfig,
-      ),
+      legacyAllowed: Boolean(orderWorkflowModuleId) &&
+        canAccessModule(
+          toLegacyPermissionSubject({
+            ...user,
+            permissions: undefined,
+            modulePermissions: undefined,
+          }),
+          orderWorkflowModuleId,
+        ),
+      resolverAllowed: Boolean(orderWorkflowTypeId && orderWorkflowModuleId) &&
+        canCreateWorkflowCardPreview(
+          user,
+          orderWorkflowTypeId,
+          orderWorkflowModuleId,
+          permissionsConfig,
+        ),
     }),
     createActionComparison({
       user,
       action: "workflow-item-approve",
-      targetId: "orders",
+      targetId: orderWorkflowTypeId || "order-workflow",
       targetLabel: "Orders approve",
       legacyAllowed: isLegacyOpsAdmin(user.role),
-      resolverAllowed: canApproveWorkflowItemPreview(
-        user,
-        { workflowTypeId: "orders", moduleId: "orders", type: "ORDER" },
-        permissionsConfig,
-      ),
+      resolverAllowed: Boolean(orderWorkflowTypeId && orderWorkflowModuleId) &&
+        canApproveWorkflowItemPreview(
+          user,
+          {
+            workflowTypeId: orderWorkflowTypeId,
+            moduleId: orderWorkflowModuleId,
+            type: "ORDER",
+          },
+          permissionsConfig,
+        ),
     }),
   );
 

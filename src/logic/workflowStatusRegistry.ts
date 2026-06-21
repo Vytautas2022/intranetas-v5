@@ -218,6 +218,21 @@ export const sanitizeWorkflowStatusConfig = (
   return sanitized.length ? sanitized : getDefaultWorkflowStatuses();
 };
 
+const FAULT_TRANSITIONS: Partial<Record<Status, Status[]>> = {
+  [Status.NEW]: [Status.IN_PROGRESS],
+  [Status.IN_PROGRESS]: [Status.WAITING_DETAILS, Status.FIXED, Status.REJECTED],
+  [Status.WAITING_DETAILS]: [Status.IN_PROGRESS],
+  [Status.FIXED]: [],
+  [Status.REJECTED]: [],
+  [Status.SOMEDAY]: [Status.REJECTED],
+};
+
+export const getAllowedTransitions = (currentStatus: string): Status[] => {
+  const transitions = FAULT_TRANSITIONS[currentStatus as Status];
+  if (transitions !== undefined) return transitions;
+  return Object.values(Status).filter((s) => s !== Status.MOVED);
+};
+
 export const getSupportedWorkflowLanes = (
   workflow: WorkflowType,
 ): WorkflowStatusId[] =>

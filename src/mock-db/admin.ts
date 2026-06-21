@@ -364,9 +364,9 @@ export interface EquipmentIssueType {
 }
 
 export const equipmentIssueTypesList: EquipmentIssueType[] = [
-  { id: 'ei1', name: 'Neveikia', priority: 'high', sla_hours: 24, applies_to: 'BOTH' },
-  { id: 'ei2', name: 'Veikia, bet kelia nepatogumų', priority: 'medium', sla_hours: 48, applies_to: 'BOTH' },
-  { id: 'ei3', name: 'Veikia', priority: 'low', sla_hours: 168, applies_to: 'BOTH' }
+  { id: 'ei1', name: 'Neveikia', priority: 'critical', sla_hours: 72, applies_to: 'BOTH' },
+  { id: 'ei2', name: 'Veikia, bet kelia nepatogumų', priority: 'high', sla_hours: 144, applies_to: 'BOTH' },
+  { id: 'ei3', name: 'Veikia', priority: 'medium', sla_hours: 240, applies_to: 'BOTH' }
 ];
 
 export const suppliersList: Supplier[] = [

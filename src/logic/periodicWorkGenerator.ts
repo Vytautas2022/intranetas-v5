@@ -16,6 +16,7 @@ import { getEquipmentIdentityFields, getFaultEquipmentId } from './equipmentFaul
 import {
   createPeriodicInstanceFromTemplate,
   linkPeriodicInstanceOutput,
+  resolvePeriodicDestinationType,
 } from '../mock-db/periodicInstances';
 
 const equipmentIssueTypesList = getLegacyEquipmentIssueTypes();
@@ -98,10 +99,14 @@ export const generatePeriodicWorksForClub = (
   totalFound = applicableTemplates.length;
 
   applicableTemplates.forEach(template => {
+    const destinationType = resolvePeriodicDestinationType(template);
+    const isOrderDestination = destinationType === 'ORDER';
+    const isEquipmentCompatibilityTemplate =
+      !template.destinationType && template.targetSubmodule === 'EQUIPMENT_FAULT';
     // Check for duplicates in current month
     let isDuplicate = false;
     
-    if (template.targetSubmodule === 'UZSAKYMAI') {
+    if (isOrderDestination) {
         isDuplicate = existingOrders.some(o => {
             const isSameTemplate = (o as any).periodicTemplateId === template.id;
             const isSameClub = o.clubId === club.id;
@@ -120,7 +125,7 @@ export const generatePeriodicWorksForClub = (
           const isSourceMatch = f.source === 'PERIODIC' || f.generatedAutomatically;
           
           // For equipment faults, also check equipmentId and issueType
-          if (template.targetSubmodule === 'EQUIPMENT_FAULT') {
+          if (isEquipmentCompatibilityTemplate) {
             const isSameEquipment = getFaultEquipmentId(f) === template.equipmentId;
             const isSameIssueType = f.issue_type_id === template.issueTypeId || f.typeId === template.issueTypeId;
             return isSameTemplate && isSameClub && isPeriodMatch && isSourceMatch && isSameEquipment && isSameIssueType;
@@ -140,7 +145,7 @@ export const generatePeriodicWorksForClub = (
       ? new Date(now.getFullYear(), now.getMonth(), template.default_day).getTime()
       : monthEnd.getTime();
 
-    if (template.targetSubmodule === 'UZSAKYMAI') {
+    if (isOrderDestination) {
         const orderId = `ord-gen-${template.id}-${club.id}-${monthKey}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
         const periodicInstance = linkPeriodicInstanceOutput(
           createPeriodicInstanceFromTemplate({
@@ -196,7 +201,7 @@ export const generatePeriodicWorksForClub = (
         let equipmentName = '';
         let issueTypeId = template.issueTypeId;
     
-        if (template.targetSubmodule === 'EQUIPMENT_FAULT') {
+        if (isEquipmentCompatibilityTemplate) {
           const issue = equipmentIssueTypesList.find(i => i.id === template.issueTypeId);
           if (issue) {
             finalSla = issue.sla_hours;
@@ -245,7 +250,7 @@ export const generatePeriodicWorksForClub = (
           clubId: club.id,
           clubName: club.name,
           status: Status.NEW,
-          type: template.targetSubmodule === 'EQUIPMENT_FAULT' ? 'EQUIPMENT_FAULT' : (template.department || 'Operacijos'),
+          type: isEquipmentCompatibilityTemplate ? 'EQUIPMENT_FAULT' : (template.department || 'Operacijos'),
           entityType: 'fault',
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -271,7 +276,7 @@ export const generatePeriodicWorksForClub = (
               timestamp: Date.now(),
               user: 'SISTEMA',
               actionType: 'CREATED',
-              reason: `Automatiškai sugeneruota periodinė užduotis (${template.targetSubmodule === 'EQUIPMENT_FAULT' ? 'Treniruoklių darbai' : 'Patalpų darbai'})`
+              reason: `Automatiškai sugeneruota periodinė užduotis (${isEquipmentCompatibilityTemplate ? 'Treniruoklių darbai' : 'Patalpų darbai'})`
             }
           ],
           comments: [],
@@ -281,7 +286,7 @@ export const generatePeriodicWorksForClub = (
           rejectReason: '',
           updatedBy: 'SISTEMA',
           code: `P-${format(now, 'MM')}-${template.id.slice(-4)}`,
-          category: template.targetSubmodule === 'EQUIPMENT_FAULT' ? 'EQUIPMENT_FAULT' : (template.department || 'OPERATIONS'),
+          category: isEquipmentCompatibilityTemplate ? 'EQUIPMENT_FAULT' : (template.department || 'OPERATIONS'),
           workflowTypeId: workflowResolution.workflowTypeId,
           checklists: cloneChecklistTemplatesForGeneratedCard(template),
         };
