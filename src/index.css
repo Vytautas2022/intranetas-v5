@@ -5,3 +5,24 @@
   --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
   --color-brand-lime: #CDD731;
 }
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.sg-kanban-grid {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  .sg-kanban-grid {
+    grid-template-columns: repeat(var(--kanban-lanes, 1), minmax(0, 1fr));
+  }
+}

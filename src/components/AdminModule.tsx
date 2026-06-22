@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useLocation, useNavigate } from "react-router-dom";
+import * as QRCode from "qrcode";
 import {
   Settings,
   MapPin,
@@ -27,6 +28,7 @@ import {
   ShieldCheck,
   Workflow,
   Upload,
+  Download,
 } from "lucide-react";
 import { AuditAdmin } from "./AuditAdmin";
 import { AssetImportModal } from "./AssetImportModal";
@@ -103,6 +105,12 @@ import {
   type AdminModuleTabId,
 } from "../modules/moduleRegistry";
 import { KEYS, loadFromStorage, saveToStorage } from "../services/persistenceService";
+import { createAssetImageThumbnail } from "../logic/imageProcessing";
+import {
+  buildAssetQrUrl,
+  ensureAssetQrUrls,
+} from "../logic/assetQrLogic";
+import { getPurposeConfig } from "../logic/workflowPurposeRegistry";
 
 interface AdminModuleProps {
   products: Product[];
@@ -306,11 +314,9 @@ const hasMatchingAssignee = (item: any, user: User) => {
     item?.assigned_to === user.id ||
     item?.assignedBy === user.id ||
     item?.assigned_by === user.id ||
-    (typeof assignedTo === "string" &&
-      (assignedTo === user.id || assignedTo === user.name)) ||
+    (typeof assignedTo === "string" && assignedTo === user.id) ||
     assignedTo?.id === user.id ||
-    (typeof assignee === "string" &&
-      (assignee === user.id || assignee === user.name)) ||
+    (typeof assignee === "string" && assignee === user.id) ||
     assignee?.id === user.id
   );
 };
@@ -369,8 +375,9 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   >(initialPermissionConfig.adminRights);
   const [assetTypes, setAssetTypes] = useState<AssetType[]>(initialAssetTypes);
   const [assetObjects, setAssetObjects] = useState<AssetObject[]>(() =>
-    loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects),
+    ensureAssetQrUrls(loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects)),
   );
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [assetIssueTypes, setAssetIssueTypes] =
     useState<AssetIssueType[]>(initialAssetIssueTypes);
   const permissionPreviewConfig: PermissionPreviewConfig = {
@@ -394,7 +401,15 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
   ]);
 
   useEffect(() => {
-    saveToStorage(KEYS.ASSET_OBJECTS, assetObjects);
+    try {
+      saveToStorage(KEYS.ASSET_OBJECTS, assetObjects);
+      setStorageError(null);
+    } catch (error) {
+      console.error("[storage] Failed to save asset objects", error);
+      setStorageError(
+        "Klaida saugant duomenis. Viršytas lokalios saugyklos limitas.",
+      );
+    }
   }, [assetObjects]);
 
   const handleResetMockPermissions = () => {
@@ -581,6 +596,20 @@ export const AdminModule: React.FC<AdminModuleProps> = ({
         </aside>
 
         <div className="flex-1 flex flex-col min-h-0 w-full overflow-visible">
+        {storageError && (
+          <div className="mx-3 mt-3 flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 md:mx-6 md:mt-6">
+            <AlertCircle size={18} className="shrink-0" />
+            <span>{storageError}</span>
+            <button
+              type="button"
+              onClick={() => setStorageError(null)}
+              className="ml-auto rounded-lg p-1 text-red-500 hover:bg-red-100 hover:text-red-700"
+              aria-label="Uždaryti"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
         {path.includes(getTabRoute("cities")) && (
           <CitiesAdmin cities={cities} setCities={setCities} clubs={clubs} />
         )}
@@ -1017,7 +1046,7 @@ function RolesPermissionsPlaceholder({
     ].filter(
       (entry) =>
         entry.roleId === role.id &&
-        hasEnabledPermission(entry as Record<string, unknown>),
+        hasEnabledPermission(entry as unknown as Record<string, unknown>),
     ).length,
   });
 
@@ -2700,15 +2729,6 @@ function AssetTypesAdmin({
       >
         {editing && (
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setWorkflowHelpOpen(true)}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-600 hover:bg-slate-100"
-              >
-                📘 Kaip veikia workflow
-              </button>
-            </div>
             <label className="block space-y-1">
               <span className="text-[11px] font-black uppercase text-slate-400">
                 Pavadinimas
@@ -2818,6 +2838,15 @@ function AssetObjectsAdmin({
   const assetImageInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showImport, setShowImport] = useState(false);
+  const [assetImageError, setAssetImageError] = useState<string | null>(null);
+  const [assetImageProcessing, setAssetImageProcessing] = useState(false);
+  const [qrPreview, setQrPreview] = useState<{
+    object: AssetObject;
+    url: string;
+    dataUrl: string;
+  } | null>(null);
+  const [copiedQrObjectId, setCopiedQrObjectId] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
   const defaultAssetTypeId =
     lockedAssetTypeId ||
     assetTypes.find((assetType) => assetType.usesAssets)?.id ||
@@ -2843,8 +2872,58 @@ function AssetObjectsAdmin({
     clubId ? clubs.find((club) => club.id === clubId)?.name || clubId : "-";
   const getAssetImageUrl = (object: AssetObject) =>
     typeof object.metadata?.imageUrl === "string" ? object.metadata.imageUrl : "";
+  const getAssetQrUrl = (object: AssetObject) =>
+    object.qrUrl || buildAssetQrUrl(object.id);
   const getAssetLocation = (object: AssetObject) =>
     typeof object.metadata?.location === "string" ? object.metadata.location : "";
+  const createQrDataUrl = (url: string, width = 192) =>
+    QRCode.toDataURL(url, {
+      errorCorrectionLevel: "M",
+      margin: 2,
+      width,
+    });
+  const previewAssetQr = async (object: AssetObject) => {
+    const url = getAssetQrUrl(object);
+    setQrError(null);
+    try {
+      setQrPreview({
+        object,
+        url,
+        dataUrl: await createQrDataUrl(url),
+      });
+    } catch (error) {
+      console.error("[asset-qr] Failed to generate preview", error);
+      setQrError("Nepavyko sugeneruoti QR peržiūros.");
+    }
+  };
+  const copyAssetQrUrl = async (object: AssetObject) => {
+    const url = getAssetQrUrl(object);
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(url);
+      setCopiedQrObjectId(object.id);
+      window.setTimeout(() => setCopiedQrObjectId(null), 1500);
+    } catch (error) {
+      console.error("[asset-qr] Failed to copy URL", error);
+      window.prompt("QR URL", url);
+    }
+  };
+  const downloadAssetQrPng = async (object: AssetObject) => {
+    const url = getAssetQrUrl(object);
+    setQrError(null);
+    try {
+      const dataUrl = await createQrDataUrl(url, 512);
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `${object.code || object.id}-qr.png`;
+      link.click();
+    } catch (error) {
+      console.error("[asset-qr] Failed to download PNG", error);
+      setQrError("Nepavyko paruošti QR PNG failo.");
+    }
+  };
   const updateEditingMetadata = (key: string, value: string) => {
     if (!editing) return;
     setEditing({
@@ -2855,28 +2934,33 @@ function AssetObjectsAdmin({
       },
     });
   };
-  const handleAssetImageUpload = (file?: File) => {
+  const handleAssetImageUpload = async (file?: File) => {
     if (!editing || !file) return;
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       window.alert("Galimi formatai: JPG, PNG arba WEBP.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return;
+    setAssetImageError(null);
+    setAssetImageProcessing(true);
+    try {
+      const thumbnail = await createAssetImageThumbnail(file);
       setEditing((current) =>
         current
           ? {
               ...current,
               metadata: {
                 ...(current.metadata || {}),
-                imageUrl: reader.result,
+                imageUrl: thumbnail,
               },
             }
           : current,
       );
-    };
-    reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("[asset-image] Failed to create thumbnail", error);
+      setAssetImageError("Nepavyko paruošti nuotraukos. Bandykite kitą failą.");
+    } finally {
+      setAssetImageProcessing(false);
+    }
   };
   const filteredObjects = assetObjects.filter((object) => {
     if (lockedAssetTypeId && object.assetTypeId !== lockedAssetTypeId) {
@@ -2896,15 +2980,17 @@ function AssetObjectsAdmin({
 
     const exists = assetObjects.some((object) => object.id === editing.id);
     const club = clubs.find((candidate) => candidate.id === editing.clubId);
+    const nextId =
+      editing.id ||
+      `asset-object-${editing.assetTypeId}-${Date.now()}`;
     const nextObject: AssetObject = {
       ...editing,
-      id:
-        editing.id ||
-        `asset-object-${editing.assetTypeId}-${Date.now()}`,
+      id: nextId,
       code: editing.code.trim() || editing.name.trim(),
       name: editing.name.trim(),
       active: editing.active !== false,
       regionId: club?.region || editing.regionId,
+      qrUrl: editing.qrUrl?.trim() || buildAssetQrUrl(nextId),
     };
 
     setAssetObjects(
@@ -2918,15 +3004,16 @@ function AssetObjectsAdmin({
   };
 
   const createAssetObject = () => {
+    const id = `asset-object-${Date.now()}`;
     setEditing({
-      id: `asset-object-${Date.now()}`,
+      id,
       assetTypeId: defaultAssetTypeId,
       code: "NEW",
       name: "Naujas turto vienetas",
       active: true,
       clubId: "",
       regionId: "",
-      qrUrl: "",
+      qrUrl: buildAssetQrUrl(id),
       metadata: {},
     });
   };
@@ -3007,6 +3094,7 @@ function AssetObjectsAdmin({
               <th className="px-4 py-3 text-left">Kodas</th>
               <th className="px-4 py-3 text-left">Klubas</th>
               <th className="px-4 py-3 text-left">Lokacija</th>
+              <th className="px-4 py-3 text-left">QR</th>
               <th className="px-4 py-3 text-left">Statusas</th>
               <th className="px-4 py-3 text-right">Veiksmai</th>
             </tr>
@@ -3046,6 +3134,30 @@ function AssetObjectsAdmin({
                   {getAssetLocation(object) || "-"}
                 </td>
                 <td className="px-4 py-3">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => previewAssetQr(object)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      title="QR peržiūra"
+                    >
+                      <QrCode size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copyAssetQrUrl(object)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      title="Kopijuoti URL"
+                    >
+                      {copiedQrObjectId === object.id ? (
+                        <Check size={16} className="text-emerald-600" />
+                      ) : (
+                        <Copy size={16} />
+                      )}
+                    </button>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
                   <AdminActiveSwitch
                     active={object.active !== false}
                     onClick={() =>
@@ -3080,7 +3192,7 @@ function AssetObjectsAdmin({
             {filteredObjects.length === 0 && (
               <tr>
                 <td
-                  colSpan={lockedAssetTypeId ? 7 : 8}
+                  colSpan={lockedAssetTypeId ? 8 : 9}
                   className="py-14 text-center"
                 >
                   <div className="mx-auto flex max-w-sm flex-col items-center gap-4 px-4">
@@ -3143,6 +3255,55 @@ function AssetObjectsAdmin({
           setShowImport(false);
         }}
       />
+
+      {qrError && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+          <AlertCircle size={14} className="shrink-0" />
+          {qrError}
+        </div>
+      )}
+
+      <AdminModal
+        title="QR peržiūra"
+        isOpen={Boolean(qrPreview)}
+        onClose={() => setQrPreview(null)}
+      >
+        {qrPreview && (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <img
+                src={qrPreview.dataUrl}
+                alt={`${qrPreview.object.name} QR`}
+                className="h-48 w-48 rounded-xl border border-slate-200 bg-white p-3"
+              />
+              <div className="text-center">
+                <p className="text-sm font-black text-slate-900">
+                  {qrPreview.object.name}
+                </p>
+                <p className="mt-1 break-all font-mono text-xs font-bold text-slate-500">
+                  {qrPreview.url}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => copyAssetQrUrl(qrPreview.object)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-200"
+              >
+                <Copy size={16} /> Copy URL
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadAssetQrPng(qrPreview.object)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+              >
+                <Download size={16} /> Download PNG
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminModal>
 
       <AdminModal
         title="Turto vienetas"
@@ -3275,9 +3436,10 @@ function AssetObjectsAdmin({
                     <button
                       type="button"
                       onClick={() => assetImageInputRef.current?.click()}
+                      disabled={assetImageProcessing}
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
                     >
-                      <Upload size={16} /> Įkelti
+                      <Upload size={16} /> {assetImageProcessing ? "Ruošiama..." : "Įkelti"}
                     </button>
                     {getAssetImageUrl(editing) && (
                       <button
@@ -3299,6 +3461,12 @@ function AssetObjectsAdmin({
                       event.target.value = "";
                     }}
                   />
+                  {assetImageError && (
+                    <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700">
+                      <AlertCircle size={14} className="shrink-0" />
+                      {assetImageError}
+                    </div>
+                  )}
                   <label className="block space-y-1">
                     <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                       URL papildomai
@@ -3320,14 +3488,56 @@ function AssetObjectsAdmin({
               <span className="text-[11px] font-black uppercase text-slate-400">
                 QR URL
               </span>
-              <input
-                value={editing.qrUrl || ""}
-                onChange={(event) =>
-                  setEditing({ ...editing, qrUrl: event.target.value })
-                }
-                className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold"
-                placeholder="https://..."
-              />
+              <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:flex-row sm:items-center">
+                <input
+                  value={getAssetQrUrl(editing)}
+                  onChange={(event) =>
+                    setEditing({ ...editing, qrUrl: event.target.value })
+                  }
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs font-bold text-slate-700"
+                  placeholder="/qr/asset-object-..."
+                />
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditing({
+                        ...editing,
+                        qrUrl: buildAssetQrUrl(editing.id),
+                      })
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                  >
+                    <RefreshCw size={14} /> Generate QR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => copyAssetQrUrl(editing)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                  >
+                    {copiedQrObjectId === editing.id ? (
+                      <Check size={14} className="text-emerald-600" />
+                    ) : (
+                      <Copy size={14} />
+                    )}
+                    Copy URL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => previewAssetQr(editing)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-black text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
+                  >
+                    <QrCode size={14} /> Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadAssetQrPng(editing)}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-black px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
+                  >
+                    <Download size={14} /> Download PNG
+                  </button>
+                </div>
+              </div>
             </label>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -3373,6 +3583,13 @@ function AssetIssueTypesAdmin({
   const getAssetTypeLabel = (assetTypeId: string) =>
     assetTypes.find((assetType) => assetType.id === assetTypeId)?.name ||
     assetTypeId;
+
+  const getPriorityLabel = (priority: AssetIssueType["priority"]) => {
+    if (priority === "low") return "Žemas";
+    if (priority === "high") return "Aukštas";
+    if (priority === "critical") return "Kritinis";
+    return "Vidutinis";
+  };
 
   const filteredIssueTypes = issueTypes.filter(
     (issueType) =>
@@ -3700,14 +3917,7 @@ function WorkflowTypesAdmin({
       CLUB: "Klubinis",
     })[resolveWorkflowScope(workflow)];
   const getWorkflowPurposeLabel = (workflow: Partial<WorkflowType>) =>
-    ({
-      FAULTS: "Gedimai",
-      TASKS: "Užduotys",
-      ORDERS: "Užsakymai",
-      PERIODIC: "Periodiniai",
-      PROJECTS: "Projektai",
-      SUGGESTIONS: "Pasiūlymai",
-    })[resolveWorkflowPurpose(workflow)];
+    getPurposeConfig(resolveWorkflowPurpose(workflow)).label;
   const hasClubField = (workflow: Partial<WorkflowType>) =>
     Boolean(
       workflow.requiredFields?.some(
@@ -3746,6 +3956,7 @@ function WorkflowTypesAdmin({
     usesAsset: boolean,
     purpose: NonNullable<WorkflowType["workflowPurpose"]>,
   ): WorkflowType["requiredFields"] => {
+    const cfg = getPurposeConfig(purpose);
     const nextFields = (workflow.requiredFields || []).filter((field) => {
       if (field.id === "clubId" || field.type === "club") return usesClub;
       if (
@@ -3754,7 +3965,7 @@ function WorkflowTypesAdmin({
       ) {
         return usesAsset;
       }
-      if (field.id === "orderCategory") return purpose === "ORDERS";
+      if (field.id === "orderCategory") return cfg.injectsOrderCategoryField;
       return true;
     });
     const ensureField = (field: WorkflowType["requiredFields"][number]) => {
@@ -3766,11 +3977,11 @@ function WorkflowTypesAdmin({
     }
     if (usesAsset) {
       ensureField({ id: "equipmentId", label: "Turto vienetas", type: "select", required: true });
-      if (purpose === "FAULTS") {
+      if (cfg.injectsIssueTypeField) {
         ensureField({ id: "typeId", label: "Gedimo tipas", type: "select", required: true });
       }
     }
-    if (purpose === "ORDERS") {
+    if (cfg.injectsOrderCategoryField) {
       ensureField({ id: "orderCategory", label: "Užsakymo kategorija", type: "select", required: true });
     }
     if (!nextFields.some((field) => field.id === "description")) {
@@ -3881,16 +4092,11 @@ function WorkflowTypesAdmin({
     const usesAsset = resolveUsesAsset(editing);
     const usesSla = resolveUsesSla(editing);
     const workflowPurpose = resolveWorkflowPurpose(editing);
-    const nextAction =
-      workflowPurpose === "ORDERS" ? "order" : workflowPurpose === "FAULTS" ? "fault" : "other";
-    const nextCategory =
-      workflowPurpose === "ORDERS"
-        ? "UZSAKYMAI"
-        : workflowPurpose === "SUGGESTIONS"
-          ? "IDEJOS"
-          : "DARBAI";
+    const purposeCfg = getPurposeConfig(workflowPurpose);
+    const nextAction = purposeCfg.action;
+    const nextCategory = purposeCfg.category;
     const nextObjectType =
-      workflowPurpose === "ORDERS"
+      purposeCfg.defaultObjectType === "ORDER"
         ? "ORDER"
         : usesAsset
           ? getObjectTypeForAssetType(editing.assetTypeId) || editing.objectType || "GENERIC"
@@ -5696,7 +5902,7 @@ function UsersAdmin({
         <button
           onClick={() => {
             setEditing({
-              id: Date.now().toString(),
+              id: generateUniqueId("u"),
               is_active: true,
               role: "OPS",
               assignedRoleIds: getRoleIdByName("OPS")
@@ -6001,9 +6207,8 @@ function UsersAdmin({
             </label>
             <input
               value={editing.id || ""}
-              onChange={(e) => setEditing({ ...editing, id: e.target.value })}
-              className="w-full p-2 border border-slate-200 rounded-lg"
-              disabled={!!users.find((u) => u.id === editing.id)}
+              readOnly
+              className="w-full p-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-400 cursor-not-allowed font-mono text-xs"
             />
           </div>
           <div>
@@ -6026,9 +6231,15 @@ function UsersAdmin({
               onChange={(e) =>
                 setEditing({ ...editing, email: e.target.value })
               }
-              className="w-full p-2 border border-slate-200 rounded-lg"
+              disabled={isSystemOwnerUser(editing as User)}
+              className="w-full p-2 border border-slate-200 rounded-lg disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
               placeholder="vardas@sportgates.lt"
             />
+            {isSystemOwnerUser(editing as User) && (
+              <p className="mt-1 text-[11px] text-slate-400">
+                Sistemos savininko el. paštas nekeičiamas
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">

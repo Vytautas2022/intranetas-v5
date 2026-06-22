@@ -6,7 +6,7 @@ import {
   type PeriodicInstance,
 } from "../../mock-db/periodicInstances";
 import { users } from "../../mock-db/users";
-import { workflowTypes } from "../../mock-db/workflowTypes";
+import { workflowTypes as defaultWorkflowTypes, type WorkflowType } from "../../mock-db/workflowTypes";
 import { cn } from "../../lib/utils";
 
 interface Props {
@@ -14,6 +14,7 @@ interface Props {
   templates?: any[];
   history?: any[];
   clubs?: any[];
+  workflowTypes?: WorkflowType[];
   onOpenCard?: (id: string) => void;
 }
 
@@ -43,6 +44,7 @@ export const PeriodicLatestTasksView: React.FC<Props> = ({
   templates = [],
   history = [],
   clubs = [],
+  workflowTypes = defaultWorkflowTypes,
   onOpenCard,
 }) => {
   const instances = useMemo(() => {

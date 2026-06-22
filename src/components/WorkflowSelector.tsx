@@ -1,12 +1,12 @@
 import React, { useMemo, useRef, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type { WorkflowType } from "../mock-db/workflowTypes";
 import { cn } from "../lib/utils";
 
 interface WorkflowSelectorProps {
   workflows: WorkflowType[];
-  selectedWorkflowTypeIds: string[];
-  onChange: (workflowTypeIds: string[]) => void;
+  selectedWorkflowId: string | null;
+  onChange: (workflowTypeId: string | null) => void;
 }
 
 const sortWorkflows = (workflows: WorkflowType[]) =>
@@ -19,28 +19,40 @@ const sortWorkflows = (workflows: WorkflowType[]) =>
 
 export const WorkflowSelector: React.FC<WorkflowSelectorProps> = ({
   workflows,
-  selectedWorkflowTypeIds,
+  selectedWorkflowId,
   onChange,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selectedLabel = useMemo(() => {
-    if (selectedWorkflowTypeIds.length === 0) return "Visi workflow";
-    if (selectedWorkflowTypeIds.length === workflows.length) return "Visi workflow";
-    if (selectedWorkflowTypeIds.length === 1) {
-      const selectedWorkflow = workflows.find(
-        (workflow) => workflow.id === selectedWorkflowTypeIds[0],
-      );
-      return selectedWorkflow?.name || selectedWorkflow?.label || "Visi workflow";
-    }
-    return `${selectedWorkflowTypeIds.length} workflow`;
-  }, [selectedWorkflowTypeIds, workflows]);
+    if (!selectedWorkflowId) return "Visi workflow";
+    const selectedWorkflow = workflows.find(
+      (workflow) => workflow.id === selectedWorkflowId,
+    );
+    return selectedWorkflow?.name || selectedWorkflow?.label || "Visi workflow";
+  }, [selectedWorkflowId, workflows]);
+
+  const sortedWorkflows = useMemo(() => sortWorkflows(workflows), [workflows]);
+  const options = useMemo(
+    () => [
+      { id: null as string | null, label: "Visi workflow" },
+      ...sortedWorkflows.map((workflow) => ({
+        id: workflow.id,
+        label: workflow.name || workflow.label || workflow.id,
+      })),
+    ],
+    [sortedWorkflows],
+  );
 
   const closeDropdown = () => {
     setIsOpen(false);
-    setQuery("");
+  };
+
+  const selectWorkflow = (workflowId: string | null) => {
+    onChange(workflowId);
+    closeDropdown();
   };
 
   React.useEffect(() => {
@@ -52,115 +64,129 @@ export const WorkflowSelector: React.FC<WorkflowSelectorProps> = ({
 
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [selectedWorkflowTypeIds]);
+  }, []);
 
-  const filteredWorkflows = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return sortWorkflows(
-      workflows.filter((workflow) => {
-        const name = workflow.name || workflow.label || "";
-        return normalizedQuery ? name.toLowerCase().includes(normalizedQuery) : true;
-      }),
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const selectedIndex = Math.max(
+      0,
+      options.findIndex((option) => option.id === selectedWorkflowId),
     );
-  }, [query, workflows]);
+    window.setTimeout(() => optionRefs.current[selectedIndex]?.focus(), 0);
+  }, [isOpen, options, selectedWorkflowId]);
 
-  const toggleWorkflow = (workflowId: string) => {
-    const next = selectedWorkflowTypeIds.includes(workflowId)
-      ? selectedWorkflowTypeIds.filter((id) => id !== workflowId)
-      : [...selectedWorkflowTypeIds, workflowId];
-    onChange(next.length === workflows.length ? [] : next);
+  const focusOption = (index: number) => {
+    const nextIndex = (index + options.length) % options.length;
+    optionRefs.current[nextIndex]?.focus();
+  };
+
+  const handleOptionKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    workflowId: string | null,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDropdown();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusOption(index + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusOption(index - 1);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusOption(0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      focusOption(options.length - 1);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectWorkflow(workflowId);
+    }
   };
 
   if (!workflows.length) {
     return (
-      <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-400">
+      <div className="flex min-h-10 items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-400">
         <span>Nėra workflow</span>
       </div>
     );
   }
 
   return (
-    <div ref={rootRef} className="relative z-[120]">
+    <div ref={rootRef} className="relative z-[120] min-w-0">
       <button
         type="button"
-        onClick={() => {
-          if (isOpen) {
+        onClick={() => setIsOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
             closeDropdown();
-          } else {
-            setIsOpen(true);
           }
         }}
-        className="flex max-w-[220px] sm:max-w-[260px] items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-all"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        className="flex min-h-10 max-w-[calc(100vw-2rem)] sm:max-w-[260px] items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition-all"
       >
         <span className="truncate">{selectedLabel}</span>
         <ChevronDown size={14} className="text-slate-400 shrink-0" />
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 mt-2 w-[min(360px,calc(100vw-24px))] rounded-2xl border border-slate-100 bg-white shadow-2xl z-[130] p-2">
-          <div className="relative mb-3">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-            <input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Ieškoti workflow..."
-              className="w-full rounded-xl border border-slate-100 bg-slate-50 py-2 pl-9 pr-3 text-xs font-medium outline-none focus:ring-2 focus:ring-brand-lime/30"
-            />
-          </div>
-
-          <div className="max-h-72 overflow-y-auto space-y-1 pb-2">
-            <button
-              type="button"
-              onClick={() => onChange([])}
-              className={cn(
-                "w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2",
-                selectedWorkflowTypeIds.length === 0
-                  ? "bg-brand-lime text-black"
-                  : "text-slate-700 hover:bg-slate-50",
-              )}
-            >
-              <input
-                type="checkbox"
-                readOnly
-                checked={selectedWorkflowTypeIds.length === 0}
-                className="h-3.5 w-3.5 rounded border-slate-300"
-              />
-              <span>Visi workflow</span>
-            </button>
-
-            {filteredWorkflows.length > 0 ? (
-              filteredWorkflows.map((workflow) => (
+        <div
+          className="fixed left-3 right-3 mt-2 sm:absolute sm:left-0 sm:right-auto sm:w-[min(320px,calc(100vw-24px))] rounded-2xl border border-slate-100 bg-white shadow-2xl z-[130] p-2"
+          role="radiogroup"
+          aria-label="Workflow filtras"
+        >
+          <div className="max-h-72 overflow-y-auto space-y-1">
+            {options.map((option, index) => {
+              const selected = selectedWorkflowId === option.id;
+              return (
                 <button
-                  key={workflow.id}
+                  key={option.id || "all"}
+                  ref={(node) => {
+                    optionRefs.current[index] = node;
+                  }}
                   type="button"
-                  onClick={() => toggleWorkflow(workflow.id)}
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => selectWorkflow(option.id)}
+                  onKeyDown={(event) =>
+                    handleOptionKeyDown(event, index, option.id)
+                  }
                   className={cn(
-                    "w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2",
-                    selectedWorkflowTypeIds.includes(workflow.id)
-                      ? "bg-slate-100 text-slate-900"
-                      : "text-slate-700 hover:bg-slate-50",
+                    "w-full min-h-11 text-left px-3 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 outline-none",
+                    selected
+                      ? "bg-brand-lime text-black"
+                      : "text-slate-700 hover:bg-slate-50 focus:bg-slate-50",
                   )}
                 >
-                  <input
-                    type="checkbox"
-                    readOnly
-                    checked={selectedWorkflowTypeIds.includes(workflow.id)}
-                    className="h-3.5 w-3.5 rounded border-slate-300"
-                  />
-                  <span className="block truncate">{workflow.name || workflow.label}</span>
+                  <span
+                    className={cn(
+                      "h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0",
+                      selected ? "border-black" : "border-slate-300",
+                    )}
+                    aria-hidden="true"
+                  >
+                    {selected && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-black" />
+                    )}
+                  </span>
+                  <span className="block truncate">{option.label}</span>
                 </button>
-              ))
-            ) : (
-              <div className="px-3 py-5 text-center text-xs font-bold text-slate-400">
-                Workflow nerasta
-              </div>
-            )}
+              );
+            })}
           </div>
-
         </div>
       )}
     </div>

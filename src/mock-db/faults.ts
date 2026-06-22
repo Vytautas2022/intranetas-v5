@@ -50,6 +50,15 @@ export interface StatusHistoryItem {
   user: string;
 }
 
+export interface ReportHistoryItem {
+  id: string;
+  timestamp: number;
+  author: string;
+  comment?: string;
+  media: FaultMedia[];
+  source: "QR" | "USER";
+}
+
 export interface Fault {
   id: string;
   title: string;
@@ -108,6 +117,10 @@ export interface Fault {
   equipment_id?: string;
   location_id?: string;
   repeat_count?: number;
+  report_count?: number;
+  photos?: FaultMedia[];
+  videos?: FaultMedia[];
+  report_history?: ReportHistoryItem[];
   source?: "USER" | "QR" | "PERIODIC";
   periodic_type?: "MANDATORY" | "OPTIONAL";
   region?: string;

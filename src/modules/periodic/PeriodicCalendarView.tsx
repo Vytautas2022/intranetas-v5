@@ -14,7 +14,7 @@ import {
 import { lt } from "date-fns/locale";
 import { CalendarDays, CheckCircle2, Clock, ExternalLink, X } from "lucide-react";
 import { users } from "../../mock-db/users";
-import { workflowTypes } from "../../mock-db/workflowTypes";
+import { workflowTypes as defaultWorkflowTypes, type WorkflowType } from "../../mock-db/workflowTypes";
 import {
   buildPeriodicInstancesForRange,
   type PeriodicInstance,
@@ -26,6 +26,7 @@ interface Props {
   templates?: any[];
   history?: any[];
   clubs?: any[];
+  workflowTypes?: WorkflowType[];
   onOpenCard?: (id: string) => void;
 }
 
@@ -89,6 +90,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
   templates = [],
   history = [],
   clubs = [],
+  workflowTypes = defaultWorkflowTypes,
   onOpenCard,
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -353,7 +355,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
       </div>
 
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="grid grid-cols-[1.3fr_1fr_1fr_140px_120px] gap-0 bg-slate-50 border-b border-slate-200 text-xs font-black uppercase tracking-wide text-slate-500">
+        <div className="hidden md:grid grid-cols-[1.3fr_1fr_1fr_140px_120px] gap-0 bg-slate-50 border-b border-slate-200 text-xs font-black uppercase tracking-wide text-slate-500">
           <div className="p-3">Pavadinimas</div>
           <div className="p-3">Klubas</div>
           <div className="p-3">Atsakingas</div>
@@ -364,7 +366,51 @@ export const PeriodicCalendarView: React.FC<Props> = ({
         {filteredInstances.length === 0 ? (
           <div className="p-8 text-center text-slate-500">Šiam laikotarpiui įrašų nėra</div>
         ) : (
-          filteredInstances.map((instance) => (
+          <>
+          <div className="md:hidden divide-y divide-slate-100">
+            {filteredInstances.map((instance) => (
+              <button
+                key={`mobile-${instance.id}`}
+                onClick={() => setSelectedInstance(instance)}
+                className="w-full p-3 text-left hover:bg-slate-50 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 break-words">
+                      {instance.titleSnapshot}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {workflowName(instance.workflowTypeId)}
+                    </div>
+                  </div>
+                  <span
+                    className={cn(
+                      "inline-flex shrink-0 px-2 py-1 rounded text-xs font-black",
+                      statusClass[instance.status],
+                    )}
+                  >
+                    {statusLabels[instance.status]}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-1 text-xs text-slate-600">
+                  <div>
+                    <span className="font-black uppercase text-slate-400">Klubas: </span>
+                    {clubName(instance.clubId)}
+                  </div>
+                  <div>
+                    <span className="font-black uppercase text-slate-400">Atsakingas: </span>
+                    {getAssigneeName(getInstanceAssigneeId(instance))}
+                  </div>
+                  <div>
+                    <span className="font-black uppercase text-slate-400">Terminas: </span>
+                    {formatDate(instance.dueDate || instance.dueAt)}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="hidden md:block">
+          {filteredInstances.map((instance) => (
             <button
               key={instance.id}
               onClick={() => setSelectedInstance(instance)}
@@ -390,16 +436,18 @@ export const PeriodicCalendarView: React.FC<Props> = ({
                 </span>
               </div>
             </button>
-          ))
+          ))}
+          </div>
+          </>
         )}
       </div>
 
       {selectedInstance && (
         <div className="fixed inset-0 z-[100] bg-slate-900/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-slate-200">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[92dvh] overflow-y-auto overflow-x-hidden">
+            <div className="flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-slate-200">
+              <div className="min-w-0">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 break-words">
                   {selectedInstance.titleSnapshot}
                 </h3>
                 <p className="text-sm text-slate-500">Periodinė užduotis</p>
@@ -412,7 +460,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
               </button>
             </div>
 
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <Detail label="Šablonas" value={selectedTemplate?.name || selectedInstance.templateId} />
               <Detail label="Workflow" value={workflowName(selectedInstance.workflowTypeId)} />
               <Detail label="Klubas" value={clubName(selectedInstance.clubId)} />
@@ -476,7 +524,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
               />
             </div>
 
-            <div className="px-5 pb-5">
+            <div className="px-4 sm:px-5 pb-5">
               <h4 className="text-sm font-black text-slate-900 mb-3">Istorija</h4>
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 {selectedTemplateHistory.length === 0 ? (
@@ -485,7 +533,7 @@ export const PeriodicCalendarView: React.FC<Props> = ({
                   selectedTemplateHistory.map((record) => (
                     <div
                       key={record.id}
-                      className="grid grid-cols-[120px_1fr_120px] gap-3 p-3 border-b border-slate-100 last:border-0 text-sm"
+                      className="grid grid-cols-1 sm:grid-cols-[120px_1fr_120px] gap-1 sm:gap-3 p-3 border-b border-slate-100 last:border-0 text-sm"
                     >
                       <div className="font-bold text-slate-700">
                         {format(new Date(record.scheduledDate), "yyyy-MM")}

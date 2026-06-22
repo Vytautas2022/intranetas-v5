@@ -50,7 +50,7 @@ const getActiveWorkflowById = (
     ? workflowTypes.find(
         (workflow) =>
           workflow.id === workflowTypeId &&
-          Boolean(workflow.active ?? workflow.enabled) &&
+          Boolean(workflow.enabled) &&
           !workflow.archivedAt,
       )
     : undefined;
@@ -63,7 +63,7 @@ const getActiveWorkflowByLegacyCategory = (
     ? workflowTypes.find(
         (workflow) =>
           workflow.legacyCategory === legacyCategory &&
-          Boolean(workflow.active ?? workflow.enabled) &&
+          Boolean(workflow.enabled) &&
           !workflow.archivedAt,
       )
     : undefined;
@@ -237,7 +237,8 @@ export interface FilterBoardEntitiesParams {
   quickFilter: string;
   periodicFilter: "ALL" | "PERIODIC" | "SIMPLE";
   clubFilter: string[];
-  selectedWorkflowTypeIds?: string[];
+  issueTypeFilter: string[];
+  selectedWorkflowId?: string | null;
   permittedWorkflowTypeIds?: string[];
 }
 
@@ -255,7 +256,8 @@ export const filterBoardEntities = ({
   quickFilter,
   periodicFilter,
   clubFilter,
-  selectedWorkflowTypeIds,
+  issueTypeFilter,
+  selectedWorkflowId,
   permittedWorkflowTypeIds,
 }: FilterBoardEntitiesParams): Fault[] => {
   const base = scopedEntities.filter((item) => {
@@ -322,11 +324,23 @@ export const filterBoardEntities = ({
       (periodicFilter === "PERIODIC" && fault.source === "PERIODIC") ||
       (periodicFilter === "SIMPLE" && fault.source !== "PERIODIC");
 
+    const issueTypeId = fault.issue_type_id || fault.typeId;
+    const isEquipmentFault =
+      fault.type === "EQUIPMENT_FAULT" ||
+      fault.category === "EQUIPMENT_FAULT";
+    const matchesIssueType =
+      issueTypeFilter.length === 0 ||
+      Boolean(
+        isEquipmentFault &&
+          issueTypeId &&
+          issueTypeFilter.includes(issueTypeId),
+      );
+
     const matchesWorkflowType =
-      selectedWorkflowTypeIds && selectedWorkflowTypeIds.length > 0
+      selectedWorkflowId
         ? Boolean(
             fault.workflowTypeId &&
-              selectedWorkflowTypeIds.includes(fault.workflowTypeId) &&
+              selectedWorkflowId === fault.workflowTypeId &&
               (!permittedWorkflowTypeIds ||
                 permittedWorkflowTypeIds.includes(fault.workflowTypeId)),
           )
@@ -340,6 +354,7 @@ export const filterBoardEntities = ({
       matchesSource &&
       matchesAssignee &&
       matchesPeriodic &&
+      matchesIssueType &&
       matchesWorkflowType
     );
   });
@@ -349,7 +364,7 @@ export const filterBoardEntities = ({
 
 export const getActiveDarbaiWorkflowIds = (
   workflowTypes: WorkflowType[],
-  selectedWorkflowTypeIds: string[] = [],
+  selectedWorkflowId?: string | null,
   currentUser?: WorkflowVisibilityUser,
 ): string[] =>
   workflowTypes
@@ -359,8 +374,8 @@ export const getActiveDarbaiWorkflowIds = (
       if (currentUser && !canViewWorkflowResolver(currentUser, workflow)) {
         return false;
       }
-      if (selectedWorkflowTypeIds.length > 0) {
-        return selectedWorkflowTypeIds.includes(workflow.id);
+      if (selectedWorkflowId) {
+        return selectedWorkflowId === workflow.id;
       }
       return true;
     })
@@ -383,8 +398,10 @@ export const getActiveWorkflowTypesForModule = (
   return workflowTypes
     .filter((workflow) => {
       const moduleMatches =
-        moduleId === "darbai" || workflow.moduleId === moduleId;
-      const active = workflow.active ?? workflow.enabled;
+        workflow.moduleId === moduleId ||
+        (moduleId === "darbai" &&
+          (!workflow.moduleId || workflow.category === "DARBAI"));
+      const active = workflow.enabled !== false;
       return (
         moduleMatches &&
         active &&

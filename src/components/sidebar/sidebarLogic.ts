@@ -7,6 +7,7 @@ import {
   canAccessPermission,
 } from "../../logic/permissionEngine";
 import { canSeeSidebarModuleResolver } from "../../logic/permissionPreviewResolver";
+import { isSystemOwnerUser } from "../../logic/systemOwner";
 
 export interface SidebarItem {
   type?: "header" | "group";
@@ -17,6 +18,7 @@ export interface SidebarItem {
   route?: string;
   tab?: string;
   hidden?: boolean;
+  systemOwnerOnly?: boolean;
   children?: any[];
 }
 
@@ -43,6 +45,7 @@ export const getSidebarItems = (): SidebarItem[] => [
     route: module.route,
     tab: module.tabId,
     hidden: module.sidebarVisibility === "hidden",
+    systemOwnerOnly: module.systemOwnerOnly,
     children: [],
   })),
 ];
@@ -51,9 +54,10 @@ export const getFilteredSidebarItems = (
   currentUser: AuthUser,
   sidebarItems: SidebarItem[],
 ) => {
-  return sidebarItems.filter((item) =>
-    canSeeSidebarModuleResolver(currentUser, item.module, item.hidden),
-  );
+  return sidebarItems.filter((item) => {
+    if (item.systemOwnerOnly && !isSystemOwnerUser(currentUser as any)) return false;
+    return canSeeSidebarModuleResolver(currentUser, item.module, item.hidden);
+  });
 };
 
 export const getSidebarSubModules = (

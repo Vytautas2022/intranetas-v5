@@ -7,6 +7,7 @@ import {
 import { assetTypes } from "./assetTypes";
 import { clubs } from "./clubs";
 import { qrEquipment, qrLocations } from "./qr-mapping";
+import { buildAssetQrUrl } from "../logic/assetQrLogic";
 
 export interface AssetObject {
   id: string;
@@ -32,71 +33,86 @@ const getClubRegion = (clubId?: string) =>
   clubs.find((club) => club.id === clubId)?.region;
 
 export const assetObjects: AssetObject[] = [
-  ...equipmentList.map((equipment) => ({
-    id: `asset-object-equipment-${equipment.id}`,
-    assetTypeId: equipmentAssetTypeId,
-    code: equipment.number || equipment.id,
-    name: equipment.name,
-    active: equipment.is_active !== false,
-    clubId: equipment.club_id,
-    regionId: getClubRegion(equipment.club_id),
-    qrUrl: equipment.qr_url,
-    metadata: {
-      legacySource: "equipmentList",
-      legacyId: equipment.id,
-      zone: equipment.zone,
-      imageUrl: equipment.image_url,
-    },
-  })),
+  ...equipmentList.map((equipment) => {
+    const id = `asset-object-equipment-${equipment.id}`;
+    return {
+      id,
+      assetTypeId: equipmentAssetTypeId,
+      code: equipment.number || equipment.id,
+      name: equipment.name,
+      active: equipment.is_active !== false,
+      clubId: equipment.club_id,
+      regionId: getClubRegion(equipment.club_id),
+      qrUrl: equipment.qr_url || buildAssetQrUrl(id),
+      metadata: {
+        legacySource: "equipmentList",
+        legacyId: equipment.id,
+        zone: equipment.zone,
+        imageUrl: equipment.image_url,
+      },
+    };
+  }),
   ...qrEquipment
     .filter(
       (equipment) =>
         !equipmentList.some((seedEquipment) => seedEquipment.id === equipment.id),
     )
-    .map((equipment) => ({
-      id: `asset-object-equipment-${equipment.id}`,
-      assetTypeId: equipmentAssetTypeId,
-      code: equipment.number || equipment.id,
-      name: equipment.name,
+    .map((equipment) => {
+      const id = `asset-object-equipment-${equipment.id}`;
+      return {
+        id,
+        assetTypeId: equipmentAssetTypeId,
+        code: equipment.number || equipment.id,
+        name: equipment.name,
+        active: true,
+        clubId: equipment.clubId,
+        regionId: getClubRegion(equipment.clubId),
+        qrUrl: buildAssetQrUrl(id),
+        metadata: {
+          legacySource: "qrEquipment",
+          legacyId: equipment.id,
+          zone: "General",
+        },
+      };
+    }),
+  ...facilityTemplates.map((template) => {
+    const id = `asset-object-facility-${template.id}`;
+    return {
+      id,
+      assetTypeId: facilityAssetTypeId,
+      code: template.id,
+      name: template.name,
       active: true,
-      clubId: equipment.clubId,
-      regionId: getClubRegion(equipment.clubId),
+      clubId: template.club_id || undefined,
+      regionId: getClubRegion(template.club_id || undefined),
+      qrUrl: buildAssetQrUrl(id),
       metadata: {
-        legacySource: "qrEquipment",
-        legacyId: equipment.id,
-        zone: "General",
+        legacySource: "facilityTemplates",
+        legacyId: template.id,
+        priority: template.priority,
+        slaHours: template.sla_hours,
+        sopUrl: template.sop_url,
+        sopDescription: template.sop_description,
       },
-    })),
-  ...facilityTemplates.map((template) => ({
-    id: `asset-object-facility-${template.id}`,
-    assetTypeId: facilityAssetTypeId,
-    code: template.id,
-    name: template.name,
-    active: true,
-    clubId: template.club_id || undefined,
-    regionId: getClubRegion(template.club_id || undefined),
-    metadata: {
-      legacySource: "facilityTemplates",
-      legacyId: template.id,
-      priority: template.priority,
-      slaHours: template.sla_hours,
-      sopUrl: template.sop_url,
-      sopDescription: template.sop_description,
-    },
-  })),
-  ...qrLocations.map((location) => ({
-    id: `asset-object-facility-${location.id}`,
-    assetTypeId: facilityAssetTypeId,
-    code: location.id,
-    name: location.name,
-    active: true,
-    clubId: location.clubId,
-    regionId: getClubRegion(location.clubId),
-    metadata: {
-      legacySource: "qrLocations",
-      legacyId: location.id,
-    },
-  })),
+    };
+  }),
+  ...qrLocations.map((location) => {
+    const id = `asset-object-facility-${location.id}`;
+    return {
+      id,
+      assetTypeId: facilityAssetTypeId,
+      code: location.id,
+      name: location.name,
+      active: true,
+      clubId: location.clubId,
+      regionId: getClubRegion(location.clubId),
+      qrUrl: buildAssetQrUrl(id),
+      metadata: {
+        legacySource: "qrLocations",
+        legacyId: location.id,
+      },
+    };
+  }),
 ];
 
 export const getAssetObjects = (

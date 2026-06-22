@@ -733,7 +733,10 @@ export const canViewWorkflowResolver = (
 
   const legacyAllowed = canLegacyViewWorkflow(user, workflow);
   if (!hasResolverWorkflowConfig(workflow.id, effectiveConfig)) {
-    return canUseMigrationFallback(user) ? legacyAllowed : false;
+    const preview = getWorkflowPermissionPreview(user, effectiveConfig);
+    const fullAccessRoleIds = new Set(["role-super-admin", "role-admin", "role-ops"]);
+    const hasFullAccess = preview.assignedRoles.some((r) => fullAccessRoleIds.has(r.id));
+    return hasFullAccess || legacyAllowed;
   }
 
   const preview = getWorkflowPermissionPreview(user, effectiveConfig);
@@ -862,7 +865,7 @@ export const canCreateWorkflowCardResolver = (
     !hasResolverModuleConfig(moduleId, effectiveConfig) ||
     !hasResolverWorkflowConfig(workflowTypeId, effectiveConfig)
   ) {
-    return canUseMigrationFallback(user) ? legacyAllowed : false;
+    return legacyAllowed;
   }
 
   const preview = getPreviewForAction(user, effectiveConfig);

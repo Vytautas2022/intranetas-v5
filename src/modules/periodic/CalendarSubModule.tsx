@@ -232,8 +232,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
   const [cancelReason, setCancelReason] = useState("");
   const [selectedOccurrence, setSelectedOccurrence] = useState<PeriodicOccurrence | null>(null);
   const activeClubs = useMemo(
-    () => clubs.filter((club) => (club.isActive ?? club.is_active) === true),
-    [],
+    () => clubs.filter((club) => club.is_active !== false),
+    [clubs],
   );
 
   // Memoized visible weeks based on current date and view mode
@@ -547,7 +547,7 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
     <div className="p-3 md:p-6 space-y-6 bg-slate-50 min-h-full overflow-y-auto">
       {/* Navigation and Period Selector */}
       {viewMode === "calendar" && (
-        <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto no-scrollbar gap-4">
+        <div className="flex flex-wrap items-center justify-center sm:justify-between bg-white p-3 rounded-2xl border border-slate-200 shadow-sm gap-3 sm:gap-4">
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
@@ -771,7 +771,63 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                   🌐 Bendros periodinės užduotys
                 </h3>
               </div>
-              <div className="overflow-x-auto">
+              <div className="md:hidden divide-y divide-slate-100">
+                {generalTemplates.map((template) => {
+                  const templateOccurrences = filteredWeeks
+                    .map((w) =>
+                      occurrences.find(
+                        (o) => o.taskId === template.id && o.plannedWeek === w,
+                      ),
+                    )
+                    .filter(Boolean) as PeriodicOccurrence[];
+                  return (
+                    <button
+                      key={`${template.id}-general-mobile`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTemplate(template);
+                        setIsModalOpen(true);
+                      }}
+                      className="w-full p-4 text-left flex flex-col gap-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="min-w-0 text-sm font-black text-slate-900 leading-tight break-words">
+                          {template.title}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-500">
+                          {templateOccurrences.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {templateOccurrences.length > 0 ? (
+                          templateOccurrences.slice(0, 8).map((occ) => {
+                            const isPastOcc = isBefore(startOfDay(new Date(occ.plannedDate)), startOfDay(new Date()));
+                            const styles = mapStatusToStyles(occ.status, isPastOcc);
+                            return (
+                              <span
+                                key={`${template.id}-general-${occ.plannedWeek}-${occ.plannedDate}-${occ.status}`}
+                                className={cn(
+                                  "inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-[10px] font-black",
+                                  styles.bg,
+                                  styles.text,
+                                )}
+                              >
+                                <span>{styles.icon}</span>
+                                {occ.plannedWeek}
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <span className="text-xs font-bold text-slate-400">
+                            Šiam laikotarpiui įvykių nėra
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-slate-200">
@@ -916,7 +972,66 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
                   {club.name}
                 </h3>
               </div>
-              <div className="overflow-x-auto">
+              <div className="md:hidden divide-y divide-slate-100">
+                {clubTemplates.map((template) => {
+                  const templateOccurrences = filteredWeeks
+                    .map((w) =>
+                      occurrences.find(
+                        (o) =>
+                          o.taskId === template.id &&
+                          o.objectId === club.id &&
+                          o.plannedWeek === w,
+                      ),
+                    )
+                    .filter(Boolean) as PeriodicOccurrence[];
+                  return (
+                    <button
+                      key={`${template.id}-${club.id}-mobile`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTemplate(template);
+                        setIsModalOpen(true);
+                      }}
+                      className="w-full p-4 text-left flex flex-col gap-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="min-w-0 text-sm font-black text-slate-900 leading-tight break-words">
+                          {template.title}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-black text-slate-500">
+                          {templateOccurrences.length}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {templateOccurrences.length > 0 ? (
+                          templateOccurrences.slice(0, 8).map((occ) => {
+                            const isPastOcc = isBefore(startOfDay(new Date(occ.plannedDate)), startOfDay(new Date()));
+                            const styles = mapStatusToStyles(occ.status, isPastOcc);
+                            return (
+                              <span
+                                key={`${template.id}-${club.id}-${occ.plannedWeek}-${occ.plannedDate}-${occ.status}`}
+                                className={cn(
+                                  "inline-flex min-h-8 items-center gap-1 rounded-lg px-2 text-[10px] font-black",
+                                  styles.bg,
+                                  styles.text,
+                                )}
+                              >
+                                <span>{styles.icon}</span>
+                                {occ.plannedWeek}
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <span className="text-xs font-bold text-slate-400">
+                            Šiam laikotarpiui įvykių nėra
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-slate-200">
@@ -1113,6 +1228,8 @@ export const PeriodicCalendarSubModule: React.FC<PeriodicCalendarSubModuleProps>
           template={selectedTemplate}
           onClose={() => setIsModalOpen(false)}
           onSave={handleSaveTemplate}
+          workflowTypes={workflowTypes}
+          clubs={clubs}
         />
       )}
 
@@ -1660,11 +1777,11 @@ const TemplateEditModalImproved = ({
       <motion.div
         initial={{ scale: 0.9, y: 20, opacity: 0 }}
         animate={{ scale: 1, y: 0, opacity: 1 }}
-        className="relative bg-white w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="relative bg-white w-full max-w-2xl rounded-[24px] sm:rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[94dvh] sm:max-h-[90vh]"
       >
-        <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <div>
-            <h2 className="text-xl font-black text-slate-900 uppercase">
+        <div className="px-4 sm:px-8 py-4 sm:py-6 border-b border-slate-100 flex justify-between items-start gap-3 bg-slate-50/50">
+          <div className="min-w-0">
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 uppercase break-words">
               {template.id ? "Redaguoti užduotį" : "Nauja periodinė užduotis"}
             </h2>
             <div className="flex items-center gap-2 mt-1">
@@ -1685,12 +1802,12 @@ const TemplateEditModalImproved = ({
           </button>
         </div>
 
-        <div className="p-8 overflow-y-auto space-y-6">
+        <div className="p-4 sm:p-8 overflow-y-auto overflow-x-hidden space-y-6">
           {sopWarningVisible && (
             <motion.div 
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
-              className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-4"
+              className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col sm:flex-row items-start gap-3 sm:gap-4"
             >
               <div className="p-2 bg-amber-500 text-white rounded-xl shadow-sm">
                 <AlertCircle size={20} />
@@ -1700,7 +1817,7 @@ const TemplateEditModalImproved = ({
                 <p className="text-xs text-amber-700 font-medium mt-1">
                   Ši periodinė užduotis neturi SOP. Rekomenduojama pridėti SOP nuorodą, kad procesas būtų standartizuotas.
                 </p>
-                <div className="flex gap-4 mt-3">
+                <div className="flex flex-wrap gap-3 sm:gap-4 mt-3">
                   <button 
                     onClick={() => {
                       setSopWarningVisible(false);
@@ -1735,7 +1852,7 @@ const TemplateEditModalImproved = ({
                 <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5 ml-1">
                   Taikymo tipas *
                 </label>
-                <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2 mb-4">
                   {[
                     { id: "GENERAL", label: "Bendroji", icon: "🌐" },
                     { id: "CLUB", label: "Klubų", icon: "🏢" },
@@ -1905,7 +2022,7 @@ const TemplateEditModalImproved = ({
                     )}
 
                     {formData.scope === "REGION" && (
-                      <div className="grid grid-cols-2 gap-1 bg-slate-50 p-3 rounded-2xl border border-slate-200 max-h-40 overflow-y-auto">
+              <div className="grid grid-cols-1 min-[390px]:grid-cols-2 gap-1 bg-slate-50 p-3 rounded-2xl border border-slate-200 max-h-40 overflow-y-auto">
                         {clubs.map((c) => (
                           <label
                             key={c.id}
@@ -2057,7 +2174,7 @@ const TemplateEditModalImproved = ({
           </div>
         </div>
 
-        <div className="p-8 bg-slate-50 border-t border-slate-100 flex gap-4">
+        <div className="p-4 sm:p-8 bg-slate-50 border-t border-slate-100 flex flex-col-reverse sm:flex-row gap-3 sm:gap-4">
           <button
             onClick={onClose}
             className="flex-1 py-4 text-slate-500 font-black uppercase text-xs tracking-widest hover:text-slate-900 transition-colors"
@@ -2074,11 +2191,11 @@ const TemplateEditModalImproved = ({
 
         {/* Copy Options Modal Overlay */}
         {copyOptionsVisible && (
-          <div className="absolute inset-0 z-[110] flex items-center justify-center bg-slate-900/40 p-6 backdrop-blur-[2px]">
+          <div className="absolute inset-0 z-[110] flex items-center justify-center bg-slate-900/40 p-3 sm:p-6 backdrop-blur-[2px]">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-[32px] p-8 shadow-2xl w-full max-w-sm space-y-6"
+              className="bg-white rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 shadow-2xl w-full max-w-sm space-y-6"
             >
               <div>
                 <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">Kopijuoti kitam klubui</h4>

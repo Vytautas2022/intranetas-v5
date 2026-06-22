@@ -6,6 +6,7 @@ import { PeriodicLatestTasksView } from "./PeriodicLatestTasksView";
 import { cn } from "../../lib/utils";
 import { PeriodicTemplate } from "../../mock-db/periodicTemplates";
 import { TemplateEditModal } from "../periodic-tasks/TemplateEditModal";
+import type { WorkflowType } from "../../mock-db/workflowTypes";
 
 type VisiblePeriodicTab = "calendar" | "latest" | "history";
 type PeriodicTab =
@@ -20,6 +21,7 @@ interface PeriodicModuleProps {
   history: any[];
   templates: any[];
   clubs: any[];
+  workflowTypes?: WorkflowType[];
   activeTab?: PeriodicTab;
   onTabChange?: (tab: PeriodicTab) => void;
   onOpenCard?: (id: string) => void;
@@ -33,6 +35,7 @@ export const PeriodicModule: React.FC<PeriodicModuleProps> = ({
   history,
   templates,
   clubs,
+  workflowTypes = [],
   activeTab: externalActiveTab,
   onTabChange,
   onOpenCard,
@@ -144,6 +147,7 @@ export const PeriodicModule: React.FC<PeriodicModuleProps> = ({
             templates={localTemplates}
             history={history}
             clubs={clubs}
+            workflowTypes={workflowTypes}
             onOpenCard={onOpenCard}
           />
         )}
@@ -154,6 +158,7 @@ export const PeriodicModule: React.FC<PeriodicModuleProps> = ({
             templates={localTemplates}
             history={history}
             clubs={clubs}
+            workflowTypes={workflowTypes}
             onOpenCard={onOpenCard}
           />
         )}
@@ -175,6 +180,8 @@ export const PeriodicModule: React.FC<PeriodicModuleProps> = ({
           template={editingTemplate}
           onClose={() => setEditingTemplate(null)}
           onSave={handleSaveTemplate}
+          workflowTypes={workflowTypes}
+          clubs={clubs}
         />
       )}
     </div>

@@ -3,7 +3,6 @@ import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import { Lock, Mail, Loader2, AlertCircle, ShieldCheck } from "lucide-react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./authContext";
-import { mockUsers } from "./mockUsers";
 import {
   canAccessRouteResolver,
   getFirstAllowedRoute,
@@ -14,9 +13,6 @@ const hasGoogleClientId =
   Boolean(GOOGLE_CLIENT_ID) &&
   GOOGLE_CLIENT_ID !== "REPLACE_WITH_GOOGLE_CLIENT_ID" &&
   GOOGLE_CLIENT_ID.endsWith(".apps.googleusercontent.com");
-const mockTestUserEmails = mockUsers
-  .map((user) => user.email)
-  .filter((email) => email.endsWith("@fitsport.lt"));
 
 export const LoginPage = () => {
   const navigate = useNavigate();
@@ -192,26 +188,6 @@ export const LoginPage = () => {
             {isLoading && <Loader2 size={18} className="animate-spin" />}
             Prisijungti
           </button>
-
-          {import.meta.env.DEV && (
-            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Mock test users
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {mockTestUserEmails.map((mockEmail) => (
-                  <button
-                    key={mockEmail}
-                    type="button"
-                    onClick={() => setEmail(mockEmail)}
-                    className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:text-slate-950"
-                  >
-                    {mockEmail}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {hasGoogleClientId && (
             <div className="space-y-3">

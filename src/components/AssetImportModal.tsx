@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { AlertCircle, Check, FileUp, Loader2, X } from "lucide-react";
 import { cn } from "../lib/utils";
+import { buildAssetQrUrl } from "../logic/assetQrLogic";
 import type { AssetObject } from "../mock-db/assetObjects";
 import type { Club } from "../mock-db/clubs";
 
@@ -19,6 +20,7 @@ interface RowPreview {
   row: ParsedRow;
   resolvedClubId: string;
   resolvedClubName: string;
+  previewImageUrl: string;
   isUpdate: boolean;
   existingId: string | null;
 }
@@ -124,6 +126,29 @@ function findExisting(assetId: string, existingObjects: AssetObject[]): AssetObj
   );
 }
 
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function isGeneratedThumbnail(value: string): boolean {
+  return value.trim().startsWith("data:image/jpeg;base64,");
+}
+
+function getImportImageUrl(rowImageUrl: string, existingObj: AssetObject | null): string | undefined {
+  const nextImageUrl = rowImageUrl.trim();
+  const existingImageUrl =
+    typeof existingObj?.metadata?.imageUrl === "string"
+      ? existingObj.metadata.imageUrl
+      : "";
+
+  if (!nextImageUrl) return existingImageUrl || undefined;
+  if (isHttpUrl(nextImageUrl) || isGeneratedThumbnail(nextImageUrl)) {
+    return nextImageUrl;
+  }
+
+  return existingImageUrl || undefined;
+}
+
 function toAssetObject(
   row: ParsedRow,
   assetTypeId: string,
@@ -143,12 +168,12 @@ function toAssetObject(
     active: existingObj?.active ?? true,
     clubId: resolvedClubId || existingObj?.clubId || undefined,
     regionId: resolvedRegion || existingObj?.regionId || undefined,
-    qrUrl: row.qr_url || existingObj?.qrUrl || undefined,
+    qrUrl: row.qr_url || existingObj?.qrUrl || buildAssetQrUrl(stableId),
     metadata: {
       ...(existingObj?.metadata || {}),
       legacyId: row.asset_id || undefined,
       location: row.location || undefined,
-      imageUrl: row.image_url || (existingObj?.metadata?.imageUrl as string) || undefined,
+      imageUrl: getImportImageUrl(row.image_url, existingObj),
       legacySource: "import",
     },
   };
@@ -179,6 +204,7 @@ export function AssetImportModal({
       row,
       resolvedClubId: resolvedClub?.id || "",
       resolvedClubName: resolvedClub?.name || row.club_name || "—",
+      previewImageUrl: getImportImageUrl(row.image_url, existing) || "",
       isUpdate: Boolean(existing),
       existingId: existing?.id || null,
     };
@@ -420,6 +446,7 @@ export function AssetImportModal({
                       <th className="px-3 py-2.5 text-left">Statusas</th>
                       <th className="px-3 py-2.5 text-left">asset_id</th>
                       <th className="px-3 py-2.5 text-left">asset_name</th>
+                      <th className="px-3 py-2.5 text-left">Foto</th>
                       <th className="px-3 py-2.5 text-left">asset_number</th>
                       <th className="px-3 py-2.5 text-left">club_name</th>
                       <th className="px-3 py-2.5 text-left">location</th>
@@ -445,6 +472,18 @@ export function AssetImportModal({
                         </td>
                         <td className="px-3 py-2 font-bold text-slate-900 max-w-[180px] truncate">
                           {p.row.asset_name || <span className="text-red-400 font-medium">—</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          {p.previewImageUrl ? (
+                            <img
+                              src={p.previewImageUrl}
+                              alt={p.row.asset_name || p.row.asset_id}
+                              className="h-9 w-9 rounded-lg border border-slate-200 object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs text-slate-500">
                           {p.row.asset_number || "—"}

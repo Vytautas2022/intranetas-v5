@@ -1,20 +1,20 @@
 import React, { useMemo, useState } from "react";
 import { AlertCircle, ArrowDown, ArrowUp, Plus, Trash2, X } from "lucide-react";
 import { PeriodicChecklistItem, PeriodicCriticality, PeriodicTemplate } from "../../mock-db/periodicTemplates";
-import { clubs } from "../../mock-db/clubs";
-import { workflowTypes } from "../../mock-db/workflowTypes";
+import type { Club } from "../../mock-db/clubs";
+import type { WorkflowType } from "../../mock-db/workflowTypes";
 
 interface TemplateEditModalProps {
   template: PeriodicTemplate;
   onClose: () => void;
   onSave: (template: PeriodicTemplate) => void;
+  workflowTypes: WorkflowType[];
+  clubs: Club[];
 }
-
-const activeClubs = clubs.filter((club) => club.is_active !== false);
 
 const today = new Date().toISOString().split("T")[0];
 
-const getInitialClubIds = (template: PeriodicTemplate): string[] => {
+const getInitialClubIds = (template: PeriodicTemplate, activeClubs: Club[]): string[] => {
   if (template.targetMode === "ALL_CLUBS") {
     return activeClubs.map((club) => club.id);
   }
@@ -32,11 +32,15 @@ export const TemplateEditModal: React.FC<TemplateEditModalProps> = ({
   template,
   onClose,
   onSave,
+  workflowTypes,
+  clubs,
 }) => {
+  const activeClubs = clubs.filter((club) => club.is_active !== false);
+
   const [formData, setFormData] = useState<PeriodicTemplate>({
     ...template,
     targetMode: "SELECTED_CLUBS",
-    targetClubIds: getInitialClubIds(template),
+    targetClubIds: getInitialClubIds(template, clubs.filter((club) => club.is_active !== false)),
     description: template.description || "",
     frequency: template.frequency || template.recurrence || "monthly",
     recurrence: template.recurrence || template.frequency || "monthly",
@@ -62,7 +66,7 @@ export const TemplateEditModal: React.FC<TemplateEditModalProps> = ({
             wf.enabled !== false && wf.active !== false && !wf.archivedAt,
         )
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [],
+    [workflowTypes],
   );
 
   const isCustomFrequency = formData.frequency === "custom_frequency";

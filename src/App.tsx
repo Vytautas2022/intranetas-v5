@@ -9,6 +9,7 @@ import {
   Routes,
   useNavigate,
   useLocation,
+  useParams,
 } from "react-router-dom";
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
@@ -168,7 +169,7 @@ import {
   canEditWorkflowCardPreview,
 } from "./logic/permissionPreviewResolver";
 import { getAssignableUsersForClub } from "./logic/userScopeLogic";
-import { ensureSystemOwner } from "./logic/systemOwner";
+import { ensureSystemOwner, isSystemOwnerUser } from "./logic/systemOwner";
 
 import { cn } from "./lib/utils";
 import { HomeActionModal } from "./components/HomeActionModal";
@@ -269,7 +270,7 @@ import { getRuntimeModuleForPath } from "./modules/moduleRuntime";
 import { PeriodicDecisionBlock } from "./components/PeriodicDecisionBlock";
 import { generatePeriodicWorksForClub } from "./logic/periodicWorkGenerator";
 import { mockPeriodicTemplates } from "./mock-db/periodicTemplates";
-import { mockPeriodicHistory } from "./mock-db/periodicHistory";
+import { mockPeriodicHistory, type PeriodicExecutionRecord } from "./mock-db/periodicHistory";
 
 import { suppliersList } from "./mock-db/suppliers";
 import {
@@ -294,6 +295,7 @@ import {
   getFacilityAssetObjects,
   type AssetObject,
 } from "./mock-db/assetObjects";
+import { ensureAssetQrUrls } from "./logic/assetQrLogic";
 import { assetTypes } from "./mock-db/assetTypes";
 import {
   initialFacilityInsights,
@@ -309,9 +311,16 @@ import { LoginPage } from "./auth/LoginPage";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { useAuth } from "./auth/authContext";
 import { DevRoleSwitcher } from "./components/DevRoleSwitcher";
+import { buildAssetWorkflowFault } from "./logic/assetFaultRegistrationLogic";
+import {
+  buildMergedFault,
+  findActiveIncidentForAsset,
+} from "./logic/faultMergeLogic";
 
 const equipmentIssueTypesList = getLegacyIssueTypes();
-const runtimeAssetObjects = loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects);
+const runtimeAssetObjects = ensureAssetQrUrls(
+  loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects),
+);
 const equipmentList = getEquipmentAssetObjects(runtimeAssetObjects);
 const facilityAssetObjects = getFacilityAssetObjects(runtimeAssetObjects);
 const facilityTemplates = facilityAssetObjects.filter(
@@ -829,6 +838,8 @@ const FaultDetailPanel = ({
 
   if (!fault) return null;
 
+  const isEquipmentFaultDetail =
+    fault.type === "EQUIPMENT_FAULT" || fault.category === "EQUIPMENT_FAULT";
   const sla = getRemainingTime(fault);
 
   const handleAddComment = () => {
@@ -888,7 +899,7 @@ const FaultDetailPanel = ({
   const handleUpdateSOP = () => {
     if (!fault) return;
     updateFaultSOP(fault, sopInput, currentUser.name);
-    handleUpdate({ sop: fault.sop });
+    handleUpdate({ sop: fault.sop, sopUrl: fault.sopUrl, sopStatus: fault.sopStatus });
     setIsSopEditing(false);
   };
 
@@ -988,9 +999,9 @@ const FaultDetailPanel = ({
 
   const handleArchiveCard = () => {
     if (!fault || fault.archivedAt) return;
-    const input = window.prompt("Archyvavimo priežastis");
-    if (input === null) return;
-    const reason = input.trim() || "Nenurodyta";
+    const confirmed = window.confirm("Ar tikrai norite archyvuoti šį gedimą?");
+    if (!confirmed) return;
+    const reason = "Archyvuota iš detalios kortelės";
     const now = Date.now();
 
     handleUpdate({
@@ -1157,17 +1168,17 @@ const FaultDetailPanel = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-x-0 top-16 bottom-0 bg-slate-900/40 z-[60]"
+            className="fixed inset-0 sm:top-16 bg-slate-900/40 z-[60]"
           />
           <motion.div
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-full max-w-xl bg-white shadow-2xl z-[70] flex flex-col overflow-hidden"
+            className="fixed right-0 top-0 sm:top-16 h-dvh sm:h-[calc(100vh-4rem)] w-full max-w-full sm:max-w-xl bg-white shadow-2xl z-[70] flex flex-col overflow-hidden"
           >
             {/* Panel Header - Clean & Compact */}
-            <div className="px-5 py-3 border-b border-slate-100 bg-white sticky top-0 z-50">
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 bg-white sticky top-0 z-50">
               {/* Close Button Absolute for Mobile Visibility */}
               <button
                 onClick={onClose}
@@ -1179,19 +1190,14 @@ const FaultDetailPanel = ({
                 />
               </button>
 
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex flex-col gap-1 flex-1">
+              <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-4">
+                <div className="flex min-w-0 flex-col gap-1 flex-1 pr-10 sm:pr-0">
                   {/* Row 1: Badges & ID */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge
                       status={fault.status}
                       role={currentUser.role}
                     />
-                    {fault.priority === "critical" && (
-                      <span className="px-2 py-0.5 rounded bg-red-500 text-white text-[8px] font-black uppercase flex items-center gap-1">
-                        <AlertCircle size={10} /> Skubus
-                      </span>
-                    )}
                     <div
                       className={cn(
                         "px-1.5 py-0.5 rounded text-[9px] font-black uppercase border flex items-center gap-1",
@@ -1244,7 +1250,7 @@ const FaultDetailPanel = ({
                           }
                         }}
                         className={cn(
-                          "text-xl font-black text-slate-900 leading-tight tracking-tight px-2 -mx-2 rounded transition-colors",
+                          "break-words text-lg sm:text-xl font-black text-slate-900 leading-tight tracking-tight px-2 -mx-2 rounded transition-colors",
                           canEdit
                             ? "cursor-pointer hover:bg-slate-50"
                             : "cursor-default",
@@ -1256,7 +1262,7 @@ const FaultDetailPanel = ({
                   </div>
 
                   {/* Row 3: Secondary Meta */}
-                  <div className="flex items-center gap-4 text-slate-400 mt-1">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-400 mt-1">
                     <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-tight">
                       <Building2 size={11} />
                       <span className="text-slate-600">{club.name}</span>
@@ -1362,9 +1368,10 @@ const FaultDetailPanel = ({
                 </div>
 
                 {/* Actions & Close */}
-                <div className="flex items-center gap-2 shrink-0 pt-0.5">
-                  <div className="flex items-center gap-1 mr-2 border-r border-slate-100 pr-2">
+                <div className="flex w-full sm:w-auto flex-wrap items-center justify-end gap-2 shrink-0 pt-0.5">
+                  <div className="flex flex-wrap items-center justify-end gap-1 sm:mr-2 sm:border-r border-slate-100 sm:pr-2">
                     {canCreateRelatedWorkflowCard &&
+                      !isEquipmentFaultDetail &&
                       fault.source !== "PERIODIC" &&
                       fault.status !== Status.MOVED &&
                       fault.status !== Status.SOMEDAY && (
@@ -1434,7 +1441,7 @@ const FaultDetailPanel = ({
                             initial={{ opacity: 0, y: 10, scale: 0.95 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                            className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-100 z-[80] p-1 overflow-hidden"
+                            className="fixed left-3 right-3 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-64 bg-white rounded-xl shadow-xl border border-slate-100 z-[80] p-1 overflow-hidden"
                           >
                             <div className="px-3 py-2 text-[8px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 mb-1 flex justify-between items-center">
                               <span>Stebėjimo nustatymai</span>
@@ -1630,11 +1637,11 @@ const FaultDetailPanel = ({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 text-slate-900 scroll-smooth pb-32">
+            <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-4 text-slate-900 scroll-smooth pb-32">
               {/* SOP Block - Compact Single Row */}
-              <div className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 flex items-center justify-between gap-4">
+              <div className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                 {isSopEditing ? (
-                  <div className="flex flex-1 gap-2">
+                  <div className="flex w-full flex-col sm:flex-row sm:flex-1 gap-2">
                     <input
                       autoFocus
                       placeholder="SOP Nuoroda..."
@@ -1659,57 +1666,62 @@ const FaultDetailPanel = ({
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={cn(
-                          "px-1.5 py-0.5 rounded text-[8px] font-black uppercase border",
-                          fault.sop?.url
-                            ? "bg-brand-lime/10 text-slate-900 border-brand-lime/30"
-                            : "bg-slate-100 text-slate-500 border-slate-200",
-                        )}
-                      >
-                        {fault.sop?.url ? "SOP Galioja" : "SOP Nėra"}
-                      </div>
-                      {fault.sop?.updatedAt && (
-                        <div className="text-[8px] font-bold text-slate-400 uppercase tracking-tight">
-                          Atnaujino:{" "}
-                          <span className="text-slate-600">
-                            {fault.sop.updatedBy}
-                          </span>{" "}
-                          • {new Date(fault.sop.updatedAt).toLocaleDateString()}
+                  (() => {
+                    const resolvedSopUrl = fault.sop?.url || fault.sopUrl || "";
+                    return (
+                      <>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
+                          <div
+                            className={cn(
+                              "px-1.5 py-0.5 rounded text-[8px] font-black uppercase border",
+                              resolvedSopUrl
+                                ? "bg-brand-lime/10 text-slate-900 border-brand-lime/30"
+                                : "bg-slate-100 text-slate-500 border-slate-200",
+                            )}
+                          >
+                            {resolvedSopUrl ? "SOP Galioja" : "SOP Nėra"}
+                          </div>
+                          {fault.sop?.updatedAt && (
+                            <div className="text-[8px] font-bold text-slate-400 uppercase tracking-tight">
+                              Atnaujino:{" "}
+                              <span className="text-slate-600">
+                                {fault.sop.updatedBy}
+                              </span>{" "}
+                              • {new Date(fault.sop.updatedAt).toLocaleDateString()}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {fault.sop?.url && (
-                        <a
-                          href={fault.sop.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[9px] font-black text-slate-900 hover:text-brand-lime uppercase tracking-widest transition-colors"
-                        >
-                          Atidaryti
-                        </a>
-                      )}
-                      {canEdit && (
-                        <button
-                          onClick={() => {
-                            setSopInput(fault.sop?.url || "");
-                            setIsSopEditing(true);
-                          }}
-                          className="text-[9px] font-black text-slate-500 hover:text-slate-700 uppercase tracking-widest"
-                        >
-                          {fault.sop?.url ? "Redaguoti" : "+ Pridėti SOP"}
-                        </button>
-                      )}
-                    </div>
-                  </>
+                        <div className="flex flex-wrap items-center gap-3">
+                          {resolvedSopUrl && (
+                            <a
+                              href={resolvedSopUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[9px] font-black text-slate-900 hover:text-brand-lime uppercase tracking-widest transition-colors"
+                            >
+                              Atidaryti
+                            </a>
+                          )}
+                          {canEdit && (
+                            <button
+                              onClick={() => {
+                                setSopInput(resolvedSopUrl);
+                                setIsSopEditing(true);
+                              }}
+                              className="text-[9px] font-black text-slate-500 hover:text-slate-700 uppercase tracking-widest"
+                            >
+                              {resolvedSopUrl ? "Redaguoti" : "+ Pridėti SOP"}
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()
                 )}
               </div>
 
               {/* Status Select - Tucked away but accessible */}
-              <div className="flex items-center gap-2 px-1">
+              <div className="flex flex-wrap items-center gap-2 px-1">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                   Statusas:
                 </span>
@@ -1739,7 +1751,7 @@ const FaultDetailPanel = ({
                       handleUpdate({ status: newStatus });
                     }
                   }}
-                  className="text-[10px] font-bold text-slate-900 bg-transparent hover:bg-slate-50 px-2 py-1 rounded-md transition-colors cursor-pointer outline-none uppercase"
+                  className="min-h-10 text-[10px] font-bold text-slate-900 bg-slate-50 sm:bg-transparent hover:bg-slate-50 px-2 py-1 rounded-md transition-colors cursor-pointer outline-none uppercase"
                 >
                   {fault.type === "ORDER"
                     ? [
@@ -1757,6 +1769,9 @@ const FaultDetailPanel = ({
                     : Object.values(Status)
                         .filter((s) => {
                           if (s === Status.MOVED) return false;
+                          if (isEquipmentFaultDetail && s === Status.SOMEDAY) {
+                            return false;
+                          }
                           const allowed = getAllowedTransitions(fault.status);
                           return s === fault.status || allowed.includes(s as Status);
                         })
@@ -1767,6 +1782,26 @@ const FaultDetailPanel = ({
                         ))}
                 </select>
               </div>
+
+              {isEquipmentFaultDetail && (
+                <div className="flex flex-wrap items-center gap-2 px-1">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                    Prioritetas:
+                  </span>
+                  <select
+                    value={fault.priority}
+                    onChange={(event) =>
+                      handleUpdate({ priority: event.target.value as Priority })
+                    }
+                    className="min-h-10 text-[10px] font-bold text-slate-900 bg-slate-50 sm:bg-transparent hover:bg-slate-50 px-2 py-1 rounded-md transition-colors cursor-pointer outline-none uppercase"
+                  >
+                    <option value="critical">Kritinis</option>
+                    <option value="high">Aukštas</option>
+                    <option value="medium">Vidutinis</option>
+                    <option value="low">Žemas</option>
+                  </select>
+                </div>
+              )}
 
               {/* ORDER DATA (General for all order-related categories) */}
               {(fault.category === "INVENTORY" ||
@@ -1957,7 +1992,7 @@ const FaultDetailPanel = ({
                   </div>
                 )}
 
-              {fault.status === Status.SOMEDAY && (
+              {!isEquipmentFaultDetail && fault.status === Status.SOMEDAY && (
                 <div className="flex flex-wrap gap-2 px-1 py-1">
                   <button
                     onClick={() => onPromoteToProject(fault.id)}
@@ -1974,7 +2009,7 @@ const FaultDetailPanel = ({
                 </div>
               )}
 
-              {fault.status === Status.MOVED && (
+              {!isEquipmentFaultDetail && fault.status === Status.MOVED && (
                 <div className="p-4 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-brand-lime">
@@ -2147,7 +2182,88 @@ const FaultDetailPanel = ({
                 </div>
               )}
 
+              {/* Report History (merge timeline) */}
+              {((fault.history || []).some((entry: any) =>
+                ["PRIMARY_REPORT", "REPEAT_REPORT", "PHOTO_ADDED", "VIDEO_ADDED"].includes(
+                  entry.actionType,
+                ),
+              ) ||
+                (fault.report_history && fault.report_history.length > 0)) && (
+                <div className="space-y-3 pt-4 border-t border-slate-100 pb-2">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <RefreshCcw size={13} /> Activity log
+                  </h3>
+                  {(fault.history || [])
+                    .filter((entry: any) =>
+                      ["PRIMARY_REPORT", "REPEAT_REPORT", "PHOTO_ADDED", "VIDEO_ADDED"].includes(
+                        entry.actionType,
+                      ),
+                    )
+                    .map((entry: any) => (
+                      <div
+                        key={entry.id || `${entry.actionType}-${entry.timestamp}`}
+                        className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+                      >
+                        <div className="text-[11px] font-black uppercase tracking-tight text-slate-800">
+                          {entry.type || entry.actionType}
+                        </div>
+                        <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                          {entry.user} • {new Date(entry.timestamp).toLocaleString("lt-LT")}
+                        </div>
+                      </div>
+                    ))}
+                  <div className="space-y-3 px-1">
+                    {(fault.report_history || []).map((entry, i) => (
+                      <div
+                        key={entry.id}
+                        className="relative flex gap-3 pb-3 last:pb-0"
+                      >
+                        {i !== (fault.report_history?.length || 0) - 1 && (
+                          <div className="absolute left-1.5 top-5 bottom-0 w-[1px] bg-slate-100" />
+                        )}
+                        <div className="w-3 h-3 rounded-full mt-1 border-2 border-white bg-orange-300 shadow-sm shrink-0 z-10" />
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-black text-slate-800 uppercase tracking-tight">
+                              Pakartotinis pranešimas
+                            </span>
+                            <span className="text-[9px] font-bold bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded border border-orange-100 uppercase">
+                              {entry.source === "QR" ? "QR" : "Rankinis"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                            <span>{entry.author}</span>
+                            <span>•</span>
+                            <span>{new Date(entry.timestamp).toLocaleString("lt-LT")}</span>
+                          </div>
+                          {entry.comment && (
+                            <p className="text-[10px] text-slate-600 mt-0.5 leading-relaxed">
+                              {entry.comment}
+                            </p>
+                          )}
+                          {entry.media.length > 0 && (
+                            <div className="flex gap-1 flex-wrap mt-1">
+                              {entry.media.filter((m) => m.type === "image").length > 0 && (
+                                <span className="text-[9px] text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                                  +{entry.media.filter((m) => m.type === "image").length} foto
+                                </span>
+                              )}
+                              {entry.media.some((m) => m.type === "video") && (
+                                <span className="text-[9px] text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                                  +1 video
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Insights Section */}
+              {!isEquipmentFaultDetail && (
               <div className="space-y-3 pt-4 pb-2 border-b border-slate-100">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-black text-amber-500 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -2233,6 +2349,7 @@ const FaultDetailPanel = ({
                   </p>
                 )}
               </div>
+              )}
 
               {/* Media */}
               <div className="space-y-3">
@@ -2751,7 +2868,7 @@ const FaultDetailPanel = ({
               >
                 {/* Media Preview */}
                 {commentMedia.length > 0 && (
-                  <div className="grid grid-cols-5 gap-2 p-2 border-b border-slate-200/50 mb-1">
+                  <div className="grid grid-cols-3 min-[390px]:grid-cols-5 gap-2 p-2 border-b border-slate-200/50 mb-1">
                     {commentMedia.map((m, idx) => (
                       <div
                         key={`comment-preview-${idx}`}
@@ -2798,7 +2915,7 @@ const FaultDetailPanel = ({
                   placeholder="Parašykite komentarą... (Ctrl+V arba tempkite failus čia)"
                   className="w-full px-4 py-3 text-sm focus:outline-none bg-transparent resize-none min-h-[60px] max-h-[150px] overflow-y-auto"
                 />
-                <div className="flex items-center justify-between p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2">
                   <div className="flex gap-1">
                     <input
                       type="file"
@@ -2827,13 +2944,13 @@ const FaultDetailPanel = ({
                     />
                     <button
                       onClick={() => commentImageInputRef.current?.click()}
-                      className="p-2 hover:bg-white text-slate-400 rounded-full transition-colors"
+                      className="min-h-11 min-w-11 p-2 hover:bg-white text-slate-400 rounded-full transition-colors"
                     >
                       <ImageIcon size={18} />
                     </button>
                     <button
                       onClick={() => commentVideoInputRef.current?.click()}
-                      className="p-2 hover:bg-white text-slate-400 rounded-full transition-colors"
+                      className="min-h-11 min-w-11 p-2 hover:bg-white text-slate-400 rounded-full transition-colors"
                     >
                       <Video size={18} />
                     </button>
@@ -2841,7 +2958,7 @@ const FaultDetailPanel = ({
                   <button
                     onClick={handleAddComment}
                     disabled={!comment.trim() && commentMedia.length === 0}
-                    className="px-6 py-2 bg-slate-900 text-white rounded-2xl text-xs font-bold hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-slate-200"
+                    className="min-h-11 px-6 py-2 bg-slate-900 text-white rounded-2xl text-xs font-bold hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-slate-200"
                   >
                     Siųsti
                   </button>
@@ -3306,6 +3423,8 @@ const QrReportView = ({
   currentUser,
   onUpdateTasks,
   workflowTypes,
+  getDefaultAssignee,
+  onFaultCreated,
 }: {
   params: { equipment_id?: string; location_id?: string };
   onClose: () => void;
@@ -3313,6 +3432,8 @@ const QrReportView = ({
   currentUser: { name: string; id: string };
   onUpdateTasks: (updatedTasks: Fault[]) => void;
   workflowTypes: WorkflowType[];
+  getDefaultAssignee?: (clubId: string) => { id: string; name: string; role: string } | undefined;
+  onFaultCreated?: (faultId: string) => void;
 }) => {
   const [comment, setComment] = useState("");
   const [feedback, setFeedback] = useState<{
@@ -3326,35 +3447,79 @@ const QrReportView = ({
     )?.id ?? "";
   });
   const [qrMedia, setQrMedia] = useState<
-    { id: string; type: "image" | "video"; url: string; name: string }[]
+    { id: string; type: "image" | "video"; url: string; name: string; size?: number }[]
   >([]);
+  const [mediaError, setMediaError] = useState<string | null>(null);
 
-  const handleQrFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const PHOTO_LIMIT = 5;
+  const VIDEO_MAX_BYTES = 30 * 1024 * 1024;
+  const PHOTO_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+  const VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+
+  const formatQrFileSize = (bytes: number) =>
+    bytes < 1024 * 1024
+      ? `${(bytes / 1024).toFixed(0)} KB`
+      : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+  const handleQrPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
+    const photos = qrMedia.filter((m) => m.type === "image");
+    let count = photos.length;
     const updated = [...qrMedia];
-    const imgCount = updated.filter((m) => m.type === "image").length;
-    const hasVideo = updated.some((m) => m.type === "video");
+    let err: string | null = null;
+
     for (const file of files) {
-      if (file.type.startsWith("image/") && imgCount < 3) {
-        try {
-          const processed = await compressAndResizeImage(file);
-          updated.push({ id: generateUniqueId("qm"), ...processed });
-        } catch {
-          // skip unprocessable image
-        }
-      } else if (file.type.startsWith("video/") && !hasVideo) {
-        updated.push({
-          id: generateUniqueId("qm"),
-          type: "video",
-          url: URL.createObjectURL(file),
-          name: file.name,
-        });
+      if (count >= PHOTO_LIMIT) {
+        err = `Galima pridėti ne daugiau kaip ${PHOTO_LIMIT} nuotraukas.`;
+        break;
+      }
+      if (!PHOTO_TYPES.includes(file.type)) {
+        err = "Palaikomi formatai: JPG, PNG, WEBP.";
+        continue;
+      }
+      try {
+        const processed = await compressAndResizeImage(file);
+        updated.push({ id: generateUniqueId("qm"), ...processed });
+        count++;
+      } catch {
+        // skip unprocessable image
       }
     }
+
+    setMediaError(err);
     setQrMedia(updated);
     e.target.value = "";
+  };
+
+  const handleQrVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!VIDEO_TYPES.includes(file.type)) {
+      setMediaError("Palaikomi formatai: MP4, MOV, WEBM.");
+      return;
+    }
+    if (file.size > VIDEO_MAX_BYTES) {
+      setMediaError(`Video negali viršyti 30 MB (dabar: ${formatQrFileSize(file.size)}).`);
+      return;
+    }
+    if (qrMedia.some((m) => m.type === "video")) {
+      setMediaError("Galima pridėti tik 1 video.");
+      return;
+    }
+
+    setMediaError(null);
+    setQrMedia((prev) => [
+      ...prev,
+      {
+        id: generateUniqueId("qm"),
+        type: "video",
+        url: URL.createObjectURL(file),
+        name: file.name,
+        size: file.size,
+      },
+    ]);
   };
 
   const removeQrMedia = (id: string) =>
@@ -3384,6 +3549,7 @@ const QrReportView = ({
       allTasks,
       currentUser,
       workflowTypes,
+      getDefaultAssignee,
     );
 
     if (result.success) {
@@ -3395,6 +3561,7 @@ const QrReportView = ({
         );
       } else if (result.newTask) {
         onUpdateTasks([result.newTask, ...allTasks]);
+        onFaultCreated?.(result.newTask.id);
       }
       setFeedback({ type: "success", message: result.message });
       setTimeout(() => onClose(), 2000);
@@ -3504,57 +3671,105 @@ const QrReportView = ({
             />
           </div>
 
-          {/* Media upload */}
+          {/* Photo gallery */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-1">
-                Foto / Video
+                Nuotraukos
               </label>
               <span className="text-[9px] font-bold text-slate-400">
-                {qrMedia.filter((m) => m.type === "image").length}/3 foto ·{" "}
-                {qrMedia.some((m) => m.type === "video") ? "1/1" : "0/1"} video
+                {qrMedia.filter((m) => m.type === "image").length}/{PHOTO_LIMIT}
               </span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {qrMedia.map((m) => (
-                <div
-                  key={m.id}
-                  className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-200 group"
-                >
-                  {m.type === "image" ? (
+            <div className="grid grid-cols-4 gap-2">
+              {qrMedia
+                .filter((m) => m.type === "image")
+                .map((m) => (
+                  <div
+                    key={m.id}
+                    className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 group"
+                  >
                     <img
                       src={m.url}
-                      alt="Preview"
+                      alt="Nuotrauka"
                       className="w-full h-full object-cover"
                     />
-                  ) : (
-                    <div className="w-full h-full bg-slate-900 flex items-center justify-center text-white">
-                      <Film size={16} />
-                    </div>
-                  )}
-                  <button
-                    onClick={() => removeQrMedia(m.id)}
-                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                  >
-                    <X size={14} className="text-white" />
-                  </button>
-                </div>
-              ))}
-              {(qrMedia.filter((m) => m.type === "image").length < 3 ||
-                !qrMedia.some((m) => m.type === "video")) && (
-                <label className="w-16 h-16 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:border-brand-lime hover:text-brand-lime cursor-pointer transition-all">
+                    <button
+                      onClick={() => removeQrMedia(m.id)}
+                      className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                    >
+                      <X size={14} className="text-white" />
+                    </button>
+                  </div>
+                ))}
+              {qrMedia.filter((m) => m.type === "image").length < PHOTO_LIMIT && (
+                <label className="aspect-square border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:border-brand-lime hover:text-brand-lime cursor-pointer transition-all">
                   <Camera size={18} />
                   <input
                     type="file"
                     multiple
-                    accept="image/*,video/*"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
                     className="hidden"
-                    onChange={handleQrFileUpload}
+                    onChange={handleQrPhotoUpload}
                   />
                 </label>
               )}
             </div>
           </div>
+
+          {/* Video */}
+          <div className="space-y-2">
+            <label className="text-[10px] uppercase font-black text-slate-400 tracking-widest px-1">
+              Video
+            </label>
+            {qrMedia.some((m) => m.type === "video") ? (
+              qrMedia
+                .filter((m) => m.type === "video")
+                .map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200"
+                  >
+                    <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
+                      <Film size={16} className="text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-800 truncate">
+                        {m.name}
+                      </p>
+                      {m.size !== undefined && (
+                        <p className="text-[10px] text-slate-400 font-medium">
+                          {formatQrFileSize(m.size)}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => removeQrMedia(m.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))
+            ) : (
+              <label className="flex items-center gap-3 p-3 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-brand-lime transition-all">
+                <Film size={18} className="text-slate-400" />
+                <span className="text-sm font-bold text-slate-500">
+                  Pasirinkti video
+                </span>
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/webm"
+                  className="hidden"
+                  onChange={handleQrVideoUpload}
+                />
+              </label>
+            )}
+          </div>
+
+          {mediaError && (
+            <p className="text-xs text-red-500 font-bold px-1">{mediaError}</p>
+          )}
 
           <button
             onClick={handleSubmit}
@@ -3783,6 +3998,303 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+function QrAssetReportPage() {
+  const { assetId = "" } = useParams();
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const [issueTypeId, setIssueTypeId] = useState("");
+  const [description, setDescription] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+
+  const assetObjects = useMemo(
+    () => ensureAssetQrUrls(loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects)),
+    [],
+  );
+  const qrWorkflowTypes = useMemo(
+    () => loadFromStorage(KEYS.WORKFLOW_TYPES, initialWorkflowTypes),
+    [],
+  );
+  const assetObject = useMemo(
+    () => assetObjects.find((object) => object.id === assetId) || null,
+    [assetId, assetObjects],
+  );
+  const workflow = useMemo(
+    () =>
+      assetObject
+        ? qrWorkflowTypes.find(
+            (candidate) =>
+              candidate.assetTypeId === assetObject.assetTypeId &&
+              Boolean(candidate.enabled) &&
+              !candidate.archivedAt,
+          ) || null
+        : null,
+    [assetObject, qrWorkflowTypes],
+  );
+  const issueTypes = useMemo(
+    () =>
+      assetObject
+        ? getIssueTypesForAssetType(assetObject.assetTypeId).filter(
+            (issueType) => issueType.active !== false,
+          )
+        : [],
+    [assetObject],
+  );
+
+  const handlePhoto = async (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Galima įkelti tik nuotrauką.");
+      return;
+    }
+    setIsProcessingPhoto(true);
+    setError(null);
+    try {
+      const media = await compressAndResizeImage(file);
+      setAttachments([
+        {
+          id: generateUniqueId("qr-photo"),
+          type: "image",
+          url: media.url,
+          name: media.name || file.name,
+          size: 0,
+        },
+      ]);
+    } catch (uploadError) {
+      console.error("[qr-report] Failed to process photo", uploadError);
+      setError("Nepavyko paruošti nuotraukos. Bandykite dar kartą.");
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!assetObject) {
+      setError("Asset nerastas");
+      return;
+    }
+    if (!workflow) {
+      setError("Šiam asset nepriskirtas aktyvus workflow.");
+      return;
+    }
+    const issueType = issueTypes.find((candidate) => candidate.id === issueTypeId);
+    if (!issueType) {
+      setError("Pasirinkite gedimo požymį.");
+      return;
+    }
+    if (!description.trim()) {
+      setError("Įveskite gedimo aprašymą.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const club = clubs.find((candidate) => candidate.id === assetObject.clubId);
+      const defaultAssignee = getAssignableUsersForClub(users, club)[0];
+      const currentFaults = applyWorkflowMigration(
+        loadFromStorage(KEYS.FAULTS, INITIAL_FAULTS),
+        getWorkflowTypeByLegacyCategory,
+      );
+      const existingFault = findActiveIncidentForAsset(
+        currentFaults,
+        assetObject,
+        workflow,
+      );
+
+      if (existingFault) {
+        const mergedFault = buildMergedFault({
+          existingFault,
+          author: "QR",
+          comment: description.trim(),
+          media: attachments.map(({ type, url, name }) => ({ type, url, name })),
+          source: "QR",
+        });
+        saveToStorage(
+          KEYS.FAULTS,
+          currentFaults.map((fault) =>
+            fault.id === mergedFault.id ? mergedFault : fault,
+          ),
+        );
+        setSuccess(true);
+        return;
+      }
+
+      const baseFault = buildAssetWorkflowFault({
+        assetObject,
+        issueType,
+        workflow,
+        description: description.trim(),
+        attachments,
+        clubs,
+        defaultAssignee,
+        authorName: "QR",
+        source: "QR",
+      });
+      const newFault = {
+        ...baseFault,
+        history: [
+          ...(baseFault.history || []),
+          {
+            id: generateUniqueId("h"),
+            timestamp: Date.now(),
+            user: "QR",
+            actionType: "CREATED_VIA_QR",
+          },
+        ],
+      };
+
+      saveToStorage(KEYS.FAULTS, [newFault, ...currentFaults]);
+      setSuccess(true);
+    } catch (submitError) {
+      console.error("[qr-report] Failed to register fault", submitError);
+      setError("Nepavyko užregistruoti gedimo. Bandykite dar kartą.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (!assetObject) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-5 py-8 text-slate-900">
+        <div className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center text-center">
+          <QrCode className="mb-4 text-slate-400" size={40} />
+          <h1 className="text-2xl font-black">Asset nerastas</h1>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-slate-50 px-4 py-5 text-slate-900">
+      <div className="mx-auto flex min-h-[calc(100vh-40px)] w-full max-w-md min-w-0 flex-col">
+        <div className="mb-5">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white">
+            <QrCode size={24} />
+          </div>
+          <h1 className="text-2xl font-black leading-tight">{assetObject.name}</h1>
+        </div>
+
+        {success ? (
+          <div className="flex flex-1 flex-col items-center justify-center rounded-3xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
+            <CheckCircle2 className="mb-4 text-emerald-500" size={48} />
+            <h2 className="text-2xl font-black">Ačiū. Gedimas užregistruotas.</h2>
+          </div>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col gap-4 rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+            <label className="space-y-2">
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+                Gedimo požymis
+              </span>
+              <select
+                value={issueTypeId}
+                onChange={(event) => setIssueTypeId(event.target.value)}
+                className="h-12 w-full min-w-0 rounded-2xl border border-slate-200 bg-white px-4 text-base font-bold outline-none focus:border-black"
+              >
+                <option value="">Pasirinkite...</option>
+                {issueTypes.map((issueType) => (
+                  <option key={issueType.id} value={issueType.id}>
+                    {issueType.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+                Gedimo aprašymas
+              </span>
+              <textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                rows={5}
+                className="w-full min-w-0 resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base font-medium outline-none focus:border-black"
+                placeholder="Trumpai aprašykite, kas neveikia arba ką pastebėjote."
+              />
+            </label>
+
+            <div className="space-y-2">
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">
+                Nuotrauka
+              </span>
+              {attachments[0] ? (
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+                  <img
+                    src={attachments[0].url}
+                    alt="Įkelta gedimo nuotrauka"
+                    className="h-44 w-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 text-slate-400">
+                  <Camera size={28} />
+                </div>
+              )}
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={isProcessingPhoto}
+                  className="min-h-12 rounded-2xl bg-slate-900 px-4 text-sm font-black text-white disabled:opacity-60"
+                >
+                  Camera
+                </button>
+                <button
+                  type="button"
+                  onClick={() => galleryInputRef.current?.click()}
+                  disabled={isProcessingPhoto}
+                  className="min-h-12 rounded-2xl bg-slate-100 px-4 text-sm font-black text-slate-800 disabled:opacity-60"
+                >
+                  Gallery
+                </button>
+              </div>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(event) => {
+                  handlePhoto(event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
+              <input
+                ref={galleryInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => {
+                  handlePhoto(event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
+            </div>
+
+            {error && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={isSubmitting || isProcessingPhoto}
+              className="mt-auto h-14 rounded-2xl bg-black px-5 text-base font-black text-white disabled:opacity-60"
+            >
+              {isSubmitting ? "Registruojama..." : "Registruoti gedimą"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -3864,12 +4376,15 @@ function MainApp() {
 
   // Handle routing / URL synchronization
   useEffect(() => {
-    const currentPath = window.location.pathname;
+    const currentPath = location.pathname;
+    if (currentPath.startsWith("/qr/")) {
+      return;
+    }
     const targetPath = getRouteSyncPath(activeTab);
     if (targetPath && !currentPath.includes(targetPath)) {
       window.history.pushState({}, "", targetPath);
     }
-  }, [activeTab]);
+  }, [activeTab, location.pathname]);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -4047,6 +4562,27 @@ function MainApp() {
     equipment_id?: string;
     location_id?: string;
   }>({});
+  const qrRouteAssetId = useMemo(() => {
+    const match = location.pathname.match(/^\/qr\/([^/]+)$/);
+    return match ? decodeURIComponent(match[1]) : null;
+  }, [location.pathname]);
+  const qrRouteAssetObjects = useMemo(
+    () =>
+      qrRouteAssetId
+        ? ensureAssetQrUrls(loadFromStorage(KEYS.ASSET_OBJECTS, initialAssetObjects))
+        : runtimeAssetObjects,
+    [qrRouteAssetId],
+  );
+  const qrRouteAsset = useMemo(
+    () =>
+      qrRouteAssetId
+        ? qrRouteAssetObjects.find((object) => object.id === qrRouteAssetId) ||
+          null
+        : null,
+    [qrRouteAssetId, qrRouteAssetObjects],
+  );
+  const handledQrRouteRef = useRef<string | null>(null);
+  const [qrRouteError, setQrRouteError] = useState<string | null>(null);
 
   const [isInsightModalOpen, setIsInsightModalOpen] = useState(false);
   const [facilityInsights, setFacilityInsights] = useState<Insight[]>(
@@ -4087,14 +4623,15 @@ function MainApp() {
       : currentUser.region,
   );
   const [clubFilter, setClubFilter] = useState<string[]>([]);
+  const [issueTypeFilter, setIssueTypeFilter] = useState<string[]>([]);
   const [slaFilter, setSlaFilter] = useState("visi");
   const [sourceFilter, setSourceFilter] = useState<"ALL" | "QR">("ALL");
   const [quickFilter, setQuickFilter] =
     useState<"all" | "delayed" | "near" | "archive">("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("ALL");
-  const [selectedWorkflowTypeIds, setSelectedWorkflowTypeIds] = useState<
-    string[]
-  >([]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
+    null,
+  );
   const [regStep, setRegStep] = useState<2 | 3>(2);
   const [regType, setRegType] = useState<string>("Darbas");
   const [activeModal, setActiveModal] = useState<
@@ -4311,6 +4848,7 @@ function MainApp() {
   const [isClosureModalOpen, setIsClosureModalOpen] = useState(false);
   const [isWaitingModalOpen, setIsWaitingModalOpen] = useState(false);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
+  const lastCreatedFaultIdRef = useRef<string | null>(null);
 
   // Registration Form State
   const DEFAULT_REG_FORM = {
@@ -4396,10 +4934,15 @@ function MainApp() {
     return (
       getAssetObjectsForAssetType(
         selectedRegistrationAssetTypeId || "",
-        runtimeAssetObjects,
+        qrRouteAssetObjects,
       ).find((object) => object.id === regForm.equipmentId) || null
     );
-  }, [isAssetRegistration, regForm.equipmentId, selectedRegistrationAssetTypeId]);
+  }, [
+    isAssetRegistration,
+    qrRouteAssetObjects,
+    regForm.equipmentId,
+    selectedRegistrationAssetTypeId,
+  ]);
 
   const selectedAssetObjectLegacyId = React.useMemo(() => {
     const legacyId = selectedAssetObject?.metadata?.legacyId;
@@ -4485,7 +5028,7 @@ function MainApp() {
       const query = equipmentSearchQuery.toLowerCase();
       const options = getAssetObjectsForAssetType(
         selectedRegistrationAssetTypeId,
-        runtimeAssetObjects,
+        qrRouteAssetObjects,
       )
         .filter(
           (object) =>
@@ -4537,6 +5080,7 @@ function MainApp() {
     isEquipmentRegistration,
     isFacilityRegistration,
     isAssetRegistration,
+    qrRouteAssetObjects,
     selectedRegistrationAssetTypeId,
     regForm.clubId,
     equipmentSearchQuery,
@@ -4624,7 +5168,7 @@ function MainApp() {
     setAppPeriodicTemplates([]);
     setClubTaskConfigs([]);
     setPeriodicHistory([]);
-    setSelectedWorkflowTypeIds([]);
+    setSelectedWorkflowId(null);
     setSelectedFault(null);
     setIsDetailPanelOpen(false);
 
@@ -4999,6 +5543,133 @@ function MainApp() {
     setRegValidationErrors({});
     setRegStep(2);
     setUploadError(null);
+  };
+
+  useEffect(() => {
+    if (!qrRouteAssetId) {
+      handledQrRouteRef.current = null;
+      setQrRouteError(null);
+      return;
+    }
+
+    if (!qrRouteAsset) {
+      setQrRouteError("Asset nerastas");
+      return;
+    }
+
+    if (handledQrRouteRef.current === qrRouteAssetId) {
+      return;
+    }
+
+    const workflow = workflowTypes.find(
+      (candidate) =>
+        candidate.assetTypeId === qrRouteAsset.assetTypeId &&
+        Boolean(candidate.enabled) &&
+        !candidate.archivedAt &&
+        getWorkflowCreateModuleId(candidate) === "darbai",
+    );
+
+    if (
+      !workflow ||
+      !canCreateWorkflowCardResolver(
+        currentUser,
+        workflow.id,
+        getWorkflowCreateModuleId(workflow),
+      )
+    ) {
+      setQrRouteError("Asset workflow nerastas");
+      return;
+    }
+
+    handledQrRouteRef.current = qrRouteAssetId;
+    setQrRouteError(null);
+    setRegValidationErrors({});
+    setUploadError(null);
+    setEquipmentSearchQuery("");
+    setRegForm({
+      ...DEFAULT_REG_FORM,
+      category: getRegistrationCompatibilityCategory(workflow),
+      workflowTypeId: workflow.id,
+      clubId: qrRouteAsset.clubId || "",
+      equipmentId: qrRouteAsset.id,
+    });
+    setRegType(workflow.name);
+    setRegStep(2);
+    setActiveModal("fault");
+  }, [currentUser, qrRouteAsset, qrRouteAssetId, workflowTypes]);
+
+  const ensureFaultVisibleOnKanban = (fault: Fault, reason: string) => {
+    lastCreatedFaultIdRef.current = fault.id;
+    const issueTypeId = fault.issue_type_id || fault.typeId;
+
+    if (import.meta.env.DEV) {
+      console.log("FAULT CREATED", {
+        reason,
+        id: fault.id,
+        title: fault.title,
+        status: fault.status,
+        normalizedStatus: normalizeWorkflowStatusId(fault.status),
+        workflowTypeId: fault.workflowTypeId,
+        issueTypeId,
+        source: fault.source,
+        clubId: fault.clubId,
+        selectedWorkflowId,
+        issueTypeFilter,
+        quickFilter,
+        slaFilter,
+        sourceFilter,
+        clubFilter,
+        assigneeFilter,
+      });
+    }
+
+    if (fault.workflowTypeId && selectedWorkflowId !== fault.workflowTypeId) {
+      setSelectedWorkflowId(fault.workflowTypeId);
+    }
+
+    if (
+      issueTypeFilter.length > 0 &&
+      (!issueTypeId || !issueTypeFilter.includes(issueTypeId))
+    ) {
+      setIssueTypeFilter([]);
+    }
+
+    if (quickFilter !== "all") {
+      setQuickFilter("all");
+    }
+
+    if (slaFilter !== "visi") {
+      setSlaFilter("visi");
+    }
+
+    if (sourceFilter !== "ALL" && sourceFilter !== fault.source) {
+      setSourceFilter("ALL");
+    }
+
+    if (clubFilter.length > 0 && !clubFilter.includes(fault.clubId)) {
+      setClubFilter([]);
+    }
+
+    if (assigneeFilter !== "ALL") {
+      const assignedToId = fault.assigned_to || fault.assigneeId;
+      const assignedToName =
+        typeof fault.assignedTo === "object" && fault.assignedTo
+          ? fault.assignedTo.name
+          : fault.assignedTo || fault.assigneeName;
+      const matchesAssignee =
+        (assigneeFilter === "MINE" &&
+          (assignedToId === currentUser.id ||
+            assignedToName === currentUser.name)) ||
+        (assigneeFilter === "UNASSIGNED" &&
+          !assignedToId &&
+          !assignedToName) ||
+        assignedToId === assigneeFilter ||
+        assignedToName === assigneeFilter;
+
+      if (!matchesAssignee) {
+        setAssigneeFilter("ALL");
+      }
+    }
   };
 
   const handleRegister = () => {
@@ -5412,39 +6083,38 @@ function MainApp() {
     const existingActiveFault = existingEquipmentFault || existingFacilityFault;
 
     if (existingActiveFault) {
-      const now = Date.now();
-      const systemComment: FaultComment = {
-        id: generateUniqueId("c"),
-        text: `Additional report received via manual registration\n\n${regForm.title.trim()}`,
-        author: "SISTEMA",
-        createdAt: now,
-        mentions: [],
-        parentId: null,
-        system: true,
-        edited: false,
-        history: [],
-        deleted: false,
+      const updatedExistingFault = buildMergedFault({
+        existingFault: existingActiveFault,
+        author: currentUser.name,
+        comment: regForm.title.trim(),
+        media: regForm.attachments.map((a) => ({
+          type: a.type as "image" | "video",
+          url: a.url,
+          name: a.name,
+        })),
         source: "USER",
-      };
-      const updatedExistingFault: Fault = {
-        ...existingActiveFault,
-        comments: [...(existingActiveFault.comments || []), systemComment],
-        repeat_count: (existingActiveFault.repeat_count || 0) + 1,
-        updatedAt: now,
-        updated_at: new Date(now).toISOString(),
-        updatedBy: currentUser.name,
-      };
+      });
 
-      setFaults((prev) =>
-        prev.map((fault) =>
+      setFaults((prev) => {
+        const next = prev.map((fault) =>
           fault.id === updatedExistingFault.id ? updatedExistingFault : fault,
-        ),
-      );
+        );
+        if (import.meta.env.DEV) {
+          console.log("FAULTS COUNT", {
+            reason: "manual-merge",
+            createdFaultId: updatedExistingFault.id,
+            before: prev.length,
+            after: next.length,
+          });
+        }
+        return next;
+      });
+      ensureFaultVisibleOnKanban(updatedExistingFault, "manual-merge");
       setNotifications((prev) =>
         addNotification(
           prev,
           currentUser.name,
-          "Active fault already exists. Information added to existing fault.",
+          "Aktyvi kortelė jau egzistuoja. Pranešimas pridėtas prie esamos kortelės.",
           "normal",
           updatedExistingFault.id,
         ),
@@ -5452,7 +6122,7 @@ function MainApp() {
       logAudit(
         updatedExistingFault.id,
         "COMMENT_ADDED",
-        "Additional manual asset report added to existing fault",
+        "Pakartotinis pranešimas pridėtas rankiniu būdu",
       );
       setSelectedFault(updatedExistingFault);
       setIsDetailPanelOpen(true);
@@ -5542,6 +6212,46 @@ function MainApp() {
       ? facilityRegistrationObjects.find((t) => t.id === selectedAssetObjectLegacyId)
       : undefined;
 
+    if (
+      isAssetRegistration &&
+      selectedAssetObject &&
+      selectedAssetIssueType &&
+      workflowForCreate
+    ) {
+      const newFault = buildAssetWorkflowFault({
+        assetObject: selectedAssetObject,
+        issueType: selectedAssetIssueType,
+        workflow: workflowForCreate,
+        description: regForm.title,
+        attachments: regForm.attachments,
+        clubs: CLUBS,
+        defaultAssignee,
+        authorName: currentUser.name,
+        source: "USER",
+      });
+
+      setFaults((prev) => {
+        const next = [newFault, ...prev];
+        if (import.meta.env.DEV) {
+          console.log("FAULTS COUNT", {
+            reason: "asset-workflow-create",
+            createdFaultId: newFault.id,
+            before: prev.length,
+            after: next.length,
+          });
+        }
+        return next;
+      });
+      ensureFaultVisibleOnKanban(newFault, "asset-workflow-create");
+      logAudit(newFault.id, "created", "Užregistruotas naujas gedimas");
+      setActiveModal(null);
+      setRegStep(2);
+      setUploadError(null);
+      setRegValidationErrors({});
+      resetRegForm();
+      return;
+    }
+
     const newFault: Fault = {
       id: generateUniqueId("f"),
       code: generateId(),
@@ -5623,7 +6333,19 @@ function MainApp() {
       customEquipmentName?: string;
     };
 
-    setFaults([newFault, ...faults]);
+    setFaults((prev) => {
+      const next = [newFault, ...prev];
+      if (import.meta.env.DEV) {
+        console.log("FAULTS COUNT", {
+          reason: "manual-create",
+          createdFaultId: newFault.id,
+          before: prev.length,
+          after: next.length,
+        });
+      }
+      return next;
+    });
+    ensureFaultVisibleOnKanban(newFault, "manual-create");
     logAudit(newFault.id, "created", "Užregistruotas naujas gedimas");
     setActiveModal(null);
     setRegStep(2);
@@ -5803,6 +6525,26 @@ ${task.updatedBy}
 
     setFaults((prev) => prev.map(mapper));
     setTasks((prev) => prev.map(mapper));
+
+    // When a periodic task is completed, record it so next instance auto-generates
+    if (updates.status === Status.FIXED) {
+      const target = [...faults, ...tasks].find((f) => f.id === id);
+      if (target && target.status !== Status.FIXED && target.periodicTemplateId) {
+        const record: PeriodicExecutionRecord = {
+          id: `ph-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          templateId: target.periodicTemplateId,
+          templateTitle: target.title || "",
+          generatedTaskId: target.id,
+          clubId: target.clubId || "",
+          clubName: target.clubName || "",
+          scheduledDate: target.periodicDueDate || target.slaDeadline || target.createdAt || updatedAt,
+          completedAt: updatedAt,
+          status: "COMPLETED",
+          completedBy: updatedBy,
+        };
+        setPeriodicHistory((prev) => [record, ...prev]);
+      }
+    }
 
     if (error) alert(error);
   };
@@ -6380,10 +7122,8 @@ ${task.updatedBy}
   }, [activeModal, canCreateVisibleWorkflow]);
 
   useEffect(() => {
-    setSelectedWorkflowTypeIds((previous) =>
-      previous.filter((workflowTypeId) =>
-        visibleWorkflowTypeIds.includes(workflowTypeId),
-      ),
+    setSelectedWorkflowId((previous) =>
+      previous && visibleWorkflowTypeIds.includes(previous) ? previous : null,
     );
   }, [visibleWorkflowTypeIds]);
 
@@ -6416,6 +7156,18 @@ ${task.updatedBy}
     [appClubs, currentUser, selectedRegion, selectedRegionCityId],
   );
 
+  const equipmentAssetTypeId = useMemo(
+    () =>
+      assetTypes.find((assetType) => assetType.code === "EQUIPMENT")?.id ||
+      "asset-type-equipment",
+    [],
+  );
+
+  const equipmentIssueTypeFilterOptions = useMemo(
+    () => getIssueTypesForAssetType(equipmentAssetTypeId),
+    [equipmentAssetTypeId],
+  );
+
   const selectedClubNames = useMemo(
     () =>
       clubFilter
@@ -6430,6 +7182,40 @@ ${task.updatedBy}
       : clubFilter.length === 1
         ? selectedClubNames[0] || "1 klubas pasirinktas"
         : `${clubFilter.length} klubai pasirinkti`;
+
+  const selectedIssueTypeNames = useMemo(
+    () =>
+      issueTypeFilter
+        .map(
+          (issueTypeId) =>
+            equipmentIssueTypeFilterOptions.find(
+              (issueType) => issueType.id === issueTypeId,
+            )?.name,
+        )
+        .filter((name): name is string => Boolean(name)),
+    [equipmentIssueTypeFilterOptions, issueTypeFilter],
+  );
+
+  const issueTypeFilterSummary =
+    issueTypeFilter.length === 0
+      ? "Visi gedimo tipai"
+      : issueTypeFilter.length === 1
+        ? selectedIssueTypeNames[0] || "1 gedimo tipas pasirinktas"
+        : `${issueTypeFilter.length} gedimo tipai pasirinkti`;
+
+  const hasAdvancedFilters =
+    selectedRegion !== "ALL" ||
+    clubFilter.length > 0 ||
+    issueTypeFilter.length > 0 ||
+    assigneeFilter !== "ALL" ||
+    sourceFilter !== "ALL";
+
+  const advancedFilterCount =
+    (selectedRegion !== "ALL" ? 1 : 0) +
+    (clubFilter.length > 0 ? 1 : 0) +
+    (issueTypeFilter.length > 0 ? 1 : 0) +
+    (assigneeFilter !== "ALL" ? 1 : 0) +
+    (sourceFilter !== "ALL" ? 1 : 0);
 
   useEffect(() => {
     const activeClubIds = new Set(activeFilterClubs.map((club) => club.id));
@@ -6458,7 +7244,8 @@ ${task.updatedBy}
         quickFilter,
         periodicFilter,
         clubFilter,
-        selectedWorkflowTypeIds,
+        issueTypeFilter,
+        selectedWorkflowId,
         permittedWorkflowTypeIds,
       }),
     [
@@ -6474,7 +7261,8 @@ ${task.updatedBy}
       quickFilter,
       periodicFilter,
       clubFilter,
-      selectedWorkflowTypeIds,
+      issueTypeFilter,
+      selectedWorkflowId,
       permittedWorkflowTypeIds,
     ],
   );
@@ -6515,11 +7303,22 @@ ${task.updatedBy}
           assignedToName === assigneeFilter;
         const matchesSource =
           sourceFilter === "ALL" || item.source === sourceFilter;
+        const itemIssueTypeId = item.issue_type_id || item.typeId;
+        const isEquipmentFault =
+          item.type === "EQUIPMENT_FAULT" ||
+          item.category === "EQUIPMENT_FAULT";
+        const matchesIssueType =
+          issueTypeFilter.length === 0 ||
+          Boolean(
+            isEquipmentFault &&
+              itemIssueTypeId &&
+              issueTypeFilter.includes(itemIssueTypeId),
+          );
         const matchesWorkflowType =
-          selectedWorkflowTypeIds.length > 0
+          selectedWorkflowId
             ? Boolean(
                 item.workflowTypeId &&
-                  selectedWorkflowTypeIds.includes(item.workflowTypeId) &&
+                  selectedWorkflowId === item.workflowTypeId &&
                   (!permittedWorkflowTypeIds ||
                     permittedWorkflowTypeIds.includes(item.workflowTypeId)),
               )
@@ -6534,6 +7333,7 @@ ${task.updatedBy}
           matchesClub &&
           matchesAssignee &&
           matchesSource &&
+          matchesIssueType &&
           matchesWorkflowType
         );
       })
@@ -6547,7 +7347,8 @@ ${task.updatedBy}
     assigneeFilter,
     currentUser,
     sourceFilter,
-    selectedWorkflowTypeIds,
+    issueTypeFilter,
+    selectedWorkflowId,
     permittedWorkflowTypeIds,
   ]);
 
@@ -6556,10 +7357,10 @@ ${task.updatedBy}
     () =>
       getActiveDarbaiWorkflowIds(
         workflowTypes,
-        selectedWorkflowTypeIds,
+        selectedWorkflowId,
         currentUser,
       ),
-    [workflowTypes, selectedWorkflowTypeIds, currentUser],
+    [workflowTypes, selectedWorkflowId, currentUser],
   );
   const hasUnmappedStatuses = useMemo(
     () => hasUnmappedWorkflowStatuses(filteredEntities),
@@ -6574,6 +7375,76 @@ ${task.updatedBy}
       }),
     [workflowTypes, canViewSomedayLane, activeWorkflowIds, hasUnmappedStatuses],
   );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const createdFaultId = lastCreatedFaultIdRef.current;
+    const createdFault = createdFaultId
+      ? faults.find((fault) => fault.id === createdFaultId)
+      : null;
+    console.log("FILTERED COUNT", {
+      faultsCount: faults.length,
+      scopedCount: scopedEntities.length,
+      filteredCount: filteredEntities.length,
+      createdFaultId,
+      createdInFaults: Boolean(createdFault),
+      createdInFiltered: Boolean(
+        createdFaultId &&
+          filteredEntities.some((fault) => fault.id === createdFaultId),
+      ),
+      selectedWorkflowId,
+      issueTypeFilter,
+      quickFilter,
+      slaFilter,
+      sourceFilter,
+      activeTab,
+      createdFault: createdFault
+        ? {
+            id: createdFault.id,
+            status: createdFault.status,
+            normalizedStatus: normalizeWorkflowStatusId(createdFault.status),
+            workflowTypeId: createdFault.workflowTypeId,
+            issueTypeId: createdFault.issue_type_id || createdFault.typeId,
+            entityType: createdFault.entityType,
+            clubId: createdFault.clubId,
+          }
+        : null,
+    });
+  }, [
+    faults,
+    scopedEntities,
+    filteredEntities,
+    selectedWorkflowId,
+    issueTypeFilter,
+    quickFilter,
+    slaFilter,
+    sourceFilter,
+    activeTab,
+  ]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const createdFaultId = lastCreatedFaultIdRef.current;
+    const counts = kanbanLanes.map((status) => {
+      const cards = (filteredEntities || []).filter((fault) =>
+        status === UNKNOWN_STATUS_LANE_ID
+          ? !isRegisteredWorkflowStatus(normalizeWorkflowStatusId(fault.status))
+          : normalizeWorkflowStatusId(fault.status) === status,
+      );
+      return {
+        status,
+        count: cards.length,
+        containsCreated: Boolean(
+          createdFaultId && cards.some((fault) => fault.id === createdFaultId),
+        ),
+      };
+    });
+    console.log("KANBAN COUNT", {
+      createdFaultId,
+      lanes: counts,
+      totalCardsInColumns: counts.reduce((sum, lane) => sum + lane.count, 0),
+    });
+  }, [kanbanLanes, filteredEntities]);
 
   const analyticsData = useMemo<AnalyticsData>(() => {
     return calculateAnalytics(
@@ -6687,6 +7558,11 @@ ${task.updatedBy}
             currentUser={{ name: currentUser.name, id: "currentUser" }}
             onUpdateTasks={(updated) => setFaults(updated)}
             workflowTypes={workflowTypes}
+            getDefaultAssignee={(clubId) => {
+              const user = getDefaultAssigneeForClub(clubId);
+              return user ? { id: user.id, name: user.name, role: user.role } : undefined;
+            }}
+            onFaultCreated={(id) => logAudit(id, "created", "Užregistruotas gedimas per QR")}
           />
         )}
 
@@ -6708,13 +7584,13 @@ ${task.updatedBy}
               {activeModule === "darbai" && activeTab === "kanban" && (
                 <WorkflowSelector
                   workflows={visibleWorkflowTypes}
-                  selectedWorkflowTypeIds={selectedWorkflowTypeIds}
-                  onChange={(workflowTypeIds) => {
+                  selectedWorkflowId={selectedWorkflowId}
+                  onChange={(workflowTypeId) => {
                     const allowedWorkflowIds = new Set(visibleWorkflowTypeIds);
-                    setSelectedWorkflowTypeIds(
-                      workflowTypeIds.filter((workflowTypeId) =>
-                        allowedWorkflowIds.has(workflowTypeId),
-                      ),
+                    setSelectedWorkflowId(
+                      workflowTypeId && allowedWorkflowIds.has(workflowTypeId)
+                        ? workflowTypeId
+                        : null,
                     );
                   }}
                 />
@@ -6928,7 +7804,7 @@ ${task.updatedBy}
               </AnimatePresence>
             </div>
 
-            <DevRoleSwitcher users={appUsers} />
+            {isSystemOwnerUser(currentUser) && <DevRoleSwitcher users={appUsers} />}
 
             <div className="w-8 h-8 rounded-full bg-slate-200 border border-slate-200 flex items-center justify-center text-[10px] text-slate-600 font-bold uppercase overflow-hidden ml-2">
               {currentUser.name[0]}
@@ -6938,7 +7814,21 @@ ${task.updatedBy}
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto bg-white pb-24 lg:pb-8 relative">
-          {activeComponent === "CeoDashboard" ? (
+          {qrRouteAssetId && qrRouteError ? (
+            <div className="flex h-full items-center justify-center p-6">
+              <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                  <QrCode size={24} />
+                </div>
+                <h2 className="text-xl font-black text-slate-900">
+                  {qrRouteError}
+                </h2>
+                <p className="mt-2 break-all font-mono text-xs font-bold text-slate-500">
+                  {qrRouteAssetId}
+                </p>
+              </div>
+            </div>
+          ) : activeComponent === "CeoDashboard" ? (
             !canAccessModule(currentUser, "ceo") ? (
               <div className="flex items-center justify-center h-full text-slate-400 text-lg">Prieiga uždrausta</div>
             ) : (
@@ -7013,6 +7903,7 @@ ${task.updatedBy}
                   history={periodicHistory}
                   templates={appPeriodicTemplates}
                   clubs={appClubs}
+                  workflowTypes={workflowTypes}
                   activeTab={activePeriodicTab}
                   onTabChange={setActivePeriodicTab}
                   onTemplatesChange={handlePeriodicTemplatesChange}
@@ -7089,41 +7980,29 @@ ${task.updatedBy}
                         onClick={() => setIsFilterModalOpen(true)}
                         className={cn(
                           "px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all border shadow-sm whitespace-nowrap",
-                          selectedRegion !== "ALL" ||
-                            clubFilter.length > 0 ||
-                            assigneeFilter !== "ALL" ||
-                            sourceFilter !== "ALL"
+                          hasAdvancedFilters
                             ? "bg-brand-lime text-black border-brand-lime"
                             : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50",
                         )}
                       >
                         <Settings2 size={16} />
                         Filtrai
-                        {(selectedRegion !== "ALL" ||
-                          clubFilter.length > 0 ||
-                          assigneeFilter !== "ALL" ||
-                          sourceFilter !== "ALL") && (
+                        {hasAdvancedFilters && (
                           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-brand-lime text-[10px] text-black font-black">
-                            {(selectedRegion !== "ALL" ? 1 : 0) +
-                              (clubFilter.length > 0 ? 1 : 0) +
-                              (assigneeFilter !== "ALL" ? 1 : 0) +
-                              (sourceFilter !== "ALL" ? 1 : 0)}
+                            {advancedFilterCount}
                           </span>
                         )}
                       </button>
                     </div>
 
                     {/* Active Filter Summary UI */}
-                    {(selectedRegion !== "ALL" ||
-                      clubFilter.length > 0 ||
-                      assigneeFilter !== "ALL" ||
-                      sourceFilter !== "ALL") && (
-                      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-50 overflow-x-auto no-scrollbar pb-1">
+                    {hasAdvancedFilters && (
+                      <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-slate-50 pb-1">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap mr-2">
                           Aktyvūs filtrai:
                         </span>
 
-                        <div className="flex gap-2 items-center">
+                        <div className="flex flex-wrap gap-2 items-center min-w-0">
                           {selectedRegion !== "ALL" && (
                             <button
                               onClick={() => {
@@ -7143,6 +8022,16 @@ ${task.updatedBy}
                               className="px-3 py-1 rounded-full bg-brand-lime text-black text-[10px] font-bold flex items-center gap-1.5 hover:opacity-80 transition-all border border-brand-lime"
                             >
                               {clubFilterSummary}
+                              <X size={10} />
+                            </button>
+                          )}
+
+                          {issueTypeFilter.length > 0 && (
+                            <button
+                              onClick={() => setIssueTypeFilter([])}
+                              className="px-3 py-1 rounded-full bg-brand-lime text-black text-[10px] font-bold flex items-center gap-1.5 hover:opacity-80 transition-all border border-brand-lime"
+                            >
+                              {issueTypeFilterSummary}
                               <X size={10} />
                             </button>
                           )}
@@ -7177,6 +8066,7 @@ ${task.updatedBy}
                             onClick={() => {
                               setSelectedRegion("ALL");
                               setClubFilter([]);
+                              setIssueTypeFilter([]);
                               setAssigneeFilter("ALL");
                               setSourceFilter("ALL");
                               setPeriodicFilter("ALL");
@@ -7192,7 +8082,7 @@ ${task.updatedBy}
 
                   {/* MOBILE FILTERS */}
                   <div className="md:hidden p-4 space-y-3">
-                    <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                    <div className="flex flex-wrap gap-2">
                       {([
                         { id: "all", label: "Visi", icon: LayoutDashboard },
                         {
@@ -7206,7 +8096,7 @@ ${task.updatedBy}
                           key={`mob-qf-${qf.id}`}
                           onClick={() => setQuickFilter(qf.id)}
                           className={cn(
-                            "py-2.5 px-4 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 border whitespace-nowrap",
+                            "min-h-11 py-2.5 px-4 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 border",
                             quickFilter === qf.id
                               ? "bg-brand-lime text-black border-brand-lime shadow-sm"
                               : "bg-white text-slate-500 border-slate-200",
@@ -7219,11 +8109,8 @@ ${task.updatedBy}
                       <button
                         onClick={() => setIsFilterModalOpen(true)}
                         className={cn(
-                          "py-2.5 px-4 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 border",
-                          selectedRegion !== "ALL" ||
-                            clubFilter.length > 0 ||
-                            assigneeFilter !== "ALL" ||
-                            sourceFilter !== "ALL"
+                          "min-h-11 py-2.5 px-4 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 border",
+                          hasAdvancedFilters
                             ? "bg-brand-lime text-black border-brand-lime"
                             : "bg-white text-slate-700 border-slate-200",
                         )}
@@ -7250,12 +8137,12 @@ ${task.updatedBy}
                 </div>
               )}
 
-              <div className="flex-1 p-4 lg:p-8 overflow-x-auto overflow-y-auto">
+              <div className="flex-1 p-3 sm:p-4 lg:p-8 overflow-x-hidden lg:overflow-x-auto overflow-y-auto">
                 <div
                   className={cn(
                     "h-full relative",
                     activeTab === "kanban"
-                      ? "min-w-[1000px] max-w-[1800px]"
+                      ? "w-full lg:min-w-[1000px] lg:max-w-[1800px]"
                       : "w-full",
                   )}
                 >
@@ -7282,7 +8169,70 @@ ${task.updatedBy}
                           </span>
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className="md:hidden divide-y divide-slate-100">
+                          {archivedEntities.length === 0 ? (
+                            <div className="px-4 py-10 text-center text-sm font-bold text-slate-400">
+                              Archyve kortelių nėra
+                            </div>
+                          ) : (
+                            archivedEntities.map((item) => {
+                              const workflowName =
+                                workflowTypes.find(
+                                  (workflow) =>
+                                    workflow.id === item.workflowTypeId,
+                                )?.name || item.type;
+                              const clubName =
+                                appClubs.find(
+                                  (club) => club.id === item.clubId,
+                                )?.name ||
+                                item.clubName ||
+                                "-";
+
+                              return (
+                                <div
+                                  key={`archive-mobile-${item.id}`}
+                                  className="p-4 space-y-3"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedFault(item);
+                                      setIsDetailPanelOpen(true);
+                                    }}
+                                    className="w-full text-left text-sm font-black text-slate-900 break-words"
+                                  >
+                                    {item.title}
+                                  </button>
+                                  <div className="grid grid-cols-1 gap-2 text-xs font-medium text-slate-500">
+                                    <span>{workflowName}</span>
+                                    <span>{clubName}</span>
+                                    <span>
+                                      {item.archivedAt
+                                        ? new Date(
+                                            item.archivedAt,
+                                          ).toLocaleString("lt-LT")
+                                        : "-"}
+                                    </span>
+                                    <span className="break-words">
+                                      {item.archiveReason || "-"}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRestoreArchivedCard(item.id)
+                                    }
+                                    className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:border-brand-lime hover:text-black transition-colors"
+                                  >
+                                    <RefreshCcw size={13} />
+                                    Atstatyti
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                        <div className="hidden md:block overflow-x-auto">
                           <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-400">
                               <tr>
@@ -7400,10 +8350,10 @@ ${task.updatedBy}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: 20 }}
-                            className="grid gap-4 items-start h-full"
+                            className="sg-kanban-grid grid gap-4 items-start h-full"
                             style={{
-                              gridTemplateColumns: `repeat(${kanbanLanes.length}, minmax(0, 1fr))`,
-                            }}
+                              "--kanban-lanes": kanbanLanes.length,
+                            } as React.CSSProperties}
                           >
                             {kanbanLanes.map((status) => {
                               const columnFaults = (
@@ -7533,6 +8483,7 @@ ${task.updatedBy}
                         history={periodicHistory}
                         templates={appPeriodicTemplates}
                         clubs={appClubs}
+                        workflowTypes={workflowTypes}
                         activeTab={activePeriodicTab}
                         onTabChange={setActivePeriodicTab}
                         onTemplatesChange={handlePeriodicTemplatesChange}
@@ -7618,6 +8569,7 @@ ${task.updatedBy}
                               history={periodicHistory}
                               templates={appPeriodicTemplates}
                               clubs={appClubs}
+                              workflowTypes={workflowTypes}
                               activeTab={activePeriodicTab}
                               onTabChange={setActivePeriodicTab}
                               onTemplatesChange={handlePeriodicTemplatesChange}
@@ -7848,7 +8800,7 @@ ${task.updatedBy}
         {/* Filter Modal */}
         <AnimatePresence>
           {isFilterModalOpen && (
-            <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center">
+            <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -7861,9 +8813,9 @@ ${task.updatedBy}
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 shadow-2xl overflow-hidden"
+                className="relative w-full max-w-lg max-h-[92dvh] bg-white rounded-t-[2rem] sm:rounded-[2.5rem] p-4 sm:p-8 shadow-2xl overflow-y-auto overflow-x-hidden"
               >
-                <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center justify-between mb-5 sm:mb-8">
                   <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
                     Filtrai
                   </h3>
@@ -8026,6 +8978,72 @@ ${task.updatedBy}
                     </div>
                   </div>
 
+                  {/* Issue Type Filter */}
+                  <div className="space-y-3">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">
+                      Gedimo tipas
+                    </label>
+                    <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3 px-1">
+                        <span className="text-sm font-bold text-slate-700">
+                          {issueTypeFilterSummary}
+                        </span>
+                        {issueTypeFilter.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setIssueTypeFilter([])}
+                            className="text-[11px] font-bold text-slate-400 hover:text-slate-700 transition-colors"
+                          >
+                            Išvalyti
+                          </button>
+                        )}
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                        {equipmentIssueTypeFilterOptions.map((issueType) => {
+                          const selected = issueTypeFilter.includes(issueType.id);
+
+                          return (
+                            <button
+                              key={`issue-type-option-filter-${issueType.id}`}
+                              type="button"
+                              onClick={() =>
+                                setIssueTypeFilter((previous) =>
+                                  previous.includes(issueType.id)
+                                    ? previous.filter((id) => id !== issueType.id)
+                                    : [...previous, issueType.id],
+                                )
+                              }
+                              className={cn(
+                                "w-full px-3 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-between text-left",
+                                selected
+                                  ? "bg-slate-900 text-white"
+                                  : "bg-white text-slate-600 hover:bg-slate-100",
+                              )}
+                            >
+                              <span>{issueType.name}</span>
+                              <span
+                                className={cn(
+                                  "w-4 h-4 rounded border flex items-center justify-center",
+                                  selected
+                                    ? "bg-brand-lime border-brand-lime"
+                                    : "bg-white border-slate-200",
+                                )}
+                              >
+                                {selected && (
+                                  <Check
+                                    size={10}
+                                    className="text-black"
+                                    strokeWidth={4}
+                                  />
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Assignee Filter */}
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] px-1">
@@ -8060,8 +9078,10 @@ ${task.updatedBy}
                     onClick={() => {
                       setSelectedRegion("ALL");
                       setClubFilter([]);
+                      setIssueTypeFilter([]);
                       setAssigneeFilter("ALL");
                       setSourceFilter("ALL");
+                      setPeriodicFilter("ALL");
                     }}
                     className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all"
                   >
@@ -9939,7 +10959,7 @@ ${task.updatedBy}
             const equipmentWorkflow = workflowTypes.find(
               (workflow) =>
                 workflow.objectType === "EQUIPMENT" &&
-                Boolean(workflow.active ?? workflow.enabled) &&
+                Boolean(workflow.enabled) &&
                 !workflow.archivedAt,
             );
             if (
@@ -10018,6 +11038,14 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/qr/:assetId"
+          element={
+            <ErrorBoundary>
+              <QrAssetReportPage />
+            </ErrorBoundary>
+          }
+        />
         <Route
           path="/*"
           element={
@@ -10300,7 +11328,7 @@ const BoardSummary = React.memo(({ faults }: { faults: Fault[] }) => {
   );
 
   return (
-    <div className="flex items-center gap-4 mb-4 px-4 py-2 bg-white rounded-xl border border-slate-100 shadow-sm overflow-x-auto w-fit">
+    <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-2 bg-white rounded-xl border border-slate-100 shadow-sm w-full sm:w-fit">
       <div className="flex items-center gap-1.5 whitespace-nowrap">
         <span className="text-red-500 text-sm">🔴</span>
         <span className="text-[11px] font-bold text-slate-900 tracking-tight">
@@ -10496,6 +11524,25 @@ const FaultCard = React.memo(({
       ? fault.assignedTo || fault.assigneeName || "Niekas"
       : fault.assignedTo.name;
   const assignableUsers = getAssignableUsersForClub(allUsers as User[], club);
+  const faultEquipmentId = getFaultEquipmentId(fault);
+  const equipment = faultEquipmentId
+    ? equipmentList.find((item) => item.id === faultEquipmentId)
+    : null;
+  const coverUrl =
+    fault.coverImage ||
+    equipment?.image_url ||
+    fault.media?.find((media) => media.type === "image")?.url;
+  const repeatedReportCount =
+    typeof fault.report_count === "number"
+      ? Math.max(0, fault.report_count - 1)
+      : fault.repeat_count || 0;
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [imageIsTooSmall, setImageIsTooSmall] = useState(false);
+
+  useEffect(() => {
+    setImageLoadFailed(false);
+    setImageIsTooSmall(false);
+  }, [coverUrl]);
 
   return (
     <Draggable draggableId={fault.id} index={index}>
@@ -10513,44 +11560,65 @@ const FaultCard = React.memo(({
             borderColors[heat.color],
           )}
         >
-          {(() => {
-            const faultEquipmentId = getFaultEquipmentId(fault);
-            const equipment = faultEquipmentId
-              ? equipmentList.find((e) => e.id === faultEquipmentId)
-              : null;
-            const coverUrl =
-              fault.coverImage ||
-              equipment?.image_url ||
-              fault.media?.find((m) => m.type === "image")?.url;
-            if (!coverUrl) return null;
-            return (
-              <div className="w-full aspect-video overflow-hidden border-b border-slate-100 flex-shrink-0">
+          <div className="w-full h-[72px] md:h-[88px] lg:h-24 overflow-hidden border-b border-slate-100 bg-slate-100 flex-shrink-0">
+            {coverUrl && !imageLoadFailed ? (
+              imageIsTooSmall ? (
+                <div className="flex h-full w-full items-center justify-center bg-slate-100">
+                  <img
+                    src={coverUrl}
+                    alt=""
+                    className="h-16 w-16 rounded-lg object-cover object-center"
+                    referrerPolicy="no-referrer"
+                    onError={() => setImageLoadFailed(true)}
+                  />
+                </div>
+              ) : (
                 <img
                   src={coverUrl}
                   alt=""
-                  className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-500"
+                  className="w-full h-full object-cover object-center transition-transform group-hover:scale-105 duration-500"
                   referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.opacity = "0";
+                  onLoad={(event) => {
+                    const image = event.currentTarget;
+                    const renderedWidth = image.clientWidth;
+                    const renderedHeight = image.clientHeight;
+                    setImageIsTooSmall(
+                      image.naturalWidth < renderedWidth ||
+                        image.naturalHeight < renderedHeight,
+                    );
                   }}
+                  onError={() => setImageLoadFailed(true)}
                 />
+              )
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-300">
+                <Dumbbell size={26} />
               </div>
-            );
-          })()}
+            )}
+          </div>
           <div className="p-2 space-y-1.5">
-            {/* PERIODIC INDICATOR */}
-            {fault.source === "PERIODIC" && (
-              <div className="flex gap-1.5 mb-1">
-                <span className="text-[8px] font-black uppercase text-brand-lime bg-brand-lime/10 px-1 py-0.5 rounded flex items-center gap-0.5 border border-brand-lime/10">
-                  <History size={8} /> Periodinis
-                </span>
-                {fault.periodic_type === "MANDATORY" ? (
-                  <span className="text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-100">
-                    Privalomas
-                  </span>
-                ) : (
-                  <span className="text-[8px] font-black uppercase text-slate-500 bg-slate-100 px-1 py-0.5 rounded border border-slate-200">
-                    Optional
+            {/* BADGES: Periodic + Repeat count */}
+            {(fault.source === "PERIODIC" || repeatedReportCount > 0) && (
+              <div className="flex gap-1.5 mb-1 flex-wrap">
+                {fault.source === "PERIODIC" && (
+                  <>
+                    <span className="text-[8px] font-black uppercase text-brand-lime bg-brand-lime/10 px-1 py-0.5 rounded flex items-center gap-0.5 border border-brand-lime/10">
+                      <History size={8} /> Periodinis
+                    </span>
+                    {fault.periodic_type === "MANDATORY" ? (
+                      <span className="text-[8px] font-black uppercase text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-100">
+                        Privalomas
+                      </span>
+                    ) : (
+                      <span className="text-[8px] font-black uppercase text-slate-500 bg-slate-100 px-1 py-0.5 rounded border border-slate-200">
+                        Optional
+                      </span>
+                    )}
+                  </>
+                )}
+                {repeatedReportCount > 0 && (
+                  <span className="text-[8px] font-black uppercase text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-100">
+                    Pakartotiniai pranešimai: {repeatedReportCount}
                   </span>
                 )}
               </div>
@@ -10954,4 +12022,5 @@ const ConversionModal = ({
     </AnimatePresence>
   );
 };
+
 

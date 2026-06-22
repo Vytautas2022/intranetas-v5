@@ -64,6 +64,9 @@ export interface Fault extends MockFault {
   assigned_at?: number;
   public_url?: string;
   assetObjectId?: string;
+  report_count?: number;
+  photos?: any[];
+  videos?: any[];
   
   // New fields for periodic refactor (template_id/due_date removed; flat periodicXxx fields are in MockFault)
   source?: "USER" | "QR" | "PERIODIC";
@@ -109,7 +112,7 @@ export interface Task {
   closedAt?: number;
   relatedFaultId: string;
   clubName: string;
-  priority: string;
+  priority: Priority;
   assignee: string;
   attachments: any[];
   history: any[];

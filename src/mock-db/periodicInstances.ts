@@ -359,9 +359,9 @@ export const adaptPeriodicTaskTemplateToPeriodicTemplate = (
   assignmentSource: template.assigned_to
     ? "TEMPLATE_ASSIGNEE"
     : "MANUAL_UNASSIGNED",
-  visibleWeeksBeforeDue: template.visibleWeeksBeforeDue ?? 0,
-  requiresComment: Boolean(template.requiresComment),
-  requiresPhotoProof: Boolean(template.requiresPhotoProof || template.proofRequired),
+  visibleWeeksBeforeDue: (template as any).visibleWeeksBeforeDue ?? 0,
+  requiresComment: Boolean((template as any).requiresComment),
+  requiresPhotoProof: Boolean((template as any).requiresPhotoProof || (template as any).proofRequired),
   isMandatory: template.isMandatory ?? template.type !== "INSPECTION",
   assigned_to: template.assigned_to,
   priority: template.priority,

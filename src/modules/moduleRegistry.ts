@@ -41,6 +41,7 @@ export interface ModuleRegistryItem {
   activeModuleId?: string;
   tabId?: string;
   showInSubNavigation?: boolean;
+  systemOwnerOnly?: boolean;
 }
 
 export type AdminModuleTabId =
@@ -91,6 +92,7 @@ export const moduleRegistry: ModuleRegistryItem[] = [
     category: "main",
     group: "Pagrindinis meniu",
     sortOrder: 10,
+    systemOwnerOnly: true,
   },
   {
     moduleId: "ops-flow",
@@ -170,6 +172,7 @@ export const moduleRegistry: ModuleRegistryItem[] = [
     category: "main",
     group: "Pagrindinis meniu",
     sortOrder: 60,
+    systemOwnerOnly: true,
   },
   {
     moduleId: "analytics",
@@ -218,6 +221,7 @@ export const moduleRegistry: ModuleRegistryItem[] = [
     category: "administration",
     group: "Pagrindinis meniu",
     sortOrder: 90,
+    systemOwnerOnly: true,
   },
 ];
 

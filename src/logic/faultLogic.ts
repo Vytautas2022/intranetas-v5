@@ -13,6 +13,14 @@ export function getFaultMeta(faultId: string) {
 }
 
 export function getPriorityLabel(priority: string) {
+  const labels: Record<string, string> = {
+    critical: "Kritinis",
+    high: "Aukštas",
+    medium: "Vidutinis",
+    low: "Žemas",
+  };
+  if (labels[priority]) return labels[priority];
+
   switch (priority) {
     case "critical": return "🔴 KRITINIS";
     case "high": return "🟠 SVARBUS";
